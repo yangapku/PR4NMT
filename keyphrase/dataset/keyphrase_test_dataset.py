@@ -180,8 +180,8 @@ class DataLoader(object):
 
     def load_testing_data_postag(self, word2idx):
         print('Loading testing dataset %s from %s' % (self.name, self.postag_datadir))
-        text_file_paths = [self.text_postag_dir + n_ for n_ in os.listdir(self.text_postag_dir)]
-        keyphrase_file_paths = [self.keyphrase_postag_dir + n_ for n_ in os.listdir(self.keyphrase_postag_dir)]
+        text_file_paths = [self.text_postag_dir + n_ for n_ in sorted(os.listdir(self.text_postag_dir), key = lambda x: int(x.split('.')[0]))]
+        keyphrase_file_paths = [self.keyphrase_postag_dir + n_ for n_ in sorted(os.listdir(self.keyphrase_postag_dir), key = lambda x: int(x.split('.')[0]))]
 
         def load_postag_text_(path):
             with open(path, 'r') as f:

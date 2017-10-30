@@ -1,3 +1,10 @@
+# add by Yangan
+__MACOSX/
+experiment_dataset.zip
+train.sh
+*.out
+
+
 # added by memray
 /.idea/
 /Experiment/

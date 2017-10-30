@@ -7,7 +7,7 @@ import os
 import copy
 
 import keyphrase.dataset.keyphrase_test_dataset as test_dataset
-from dataset import dataset_utils
+from keyphrase.dataset import dataset_utils
 
 logger = logging.getLogger(__name__)
 

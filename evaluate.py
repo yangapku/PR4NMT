@@ -334,7 +334,7 @@ def evaluate_baselines():
     '''
     # base_dir = '/Users/memray/Project/Keyphrase_Extractor-UTD/'
     # 'TfIdf', 'TextRank', 'SingleRank', 'ExpandRank', 'Maui', 'KEA', 'RNN_present', 'CopyRNN_present_singleword=0', 'CopyRNN_present_singleword=1', 'CopyRNN_present_singleword=2'
-    models = ['CopyRNN_present_singleword=1']
+    models = ['Res_copy_present_10.15']
 
     test_sets = config['testing_datasets']
 

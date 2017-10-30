@@ -428,8 +428,8 @@ if __name__ == '__main__':
                 if do_validate and batch_id % 1000 == 0 and not (batch_id==0 and epoch==1):
                     logger.info('Validate @ epoch=%d, batch=%d' % (epoch, batch_id))
                     # 1. Prepare data
-                    data_s = np.array(validation_set['source'])
-                    data_t = np.array(validation_set['target'])
+                    data_s = np.array(validation_set['source'])[:config['validation_size']]
+                    data_t = np.array(validation_set['target'])[:config['validation_size']]
 
                     # if len(data_s) > 2000:
                     #     data_s = data_s[:2000]
@@ -490,7 +490,7 @@ if __name__ == '__main__':
                         logger.info('Not improved for %s tests.' % valid_param['valids_not_improved'])
 
                 # 5. Save model
-                if batch_id % 500 == 0 and batch_id > 1:
+                if batch_id % 1000 == 0 and batch_id > 1:
                     # save the weights every K rounds
                     agent.save(config['path_experiment'] + '/experiments.{0}.id={1}.epoch={2}.batch={3}.pkl'.format(config['task_name'], config['timemark'], epoch, batch_id))
 
@@ -509,6 +509,7 @@ if __name__ == '__main__':
     '''
     test accuracy and f-score at the end of each epoch
     '''
+
     if do_predict:
         for dataset_name in config['testing_datasets']:
             # override the original test_set
