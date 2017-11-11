@@ -1145,7 +1145,7 @@ class DecoderAtt(Decoder):
         # prepare for searching
         Lmax   = self.config['dec_voc_size']
         sample = [] # predited sequences
-        attention_probs    = [] # don't know what's this
+        attention_probs    = []
         attend = []
         score  = [] # probability of predited sequences
         state = [] # the output encoding of predited sequences

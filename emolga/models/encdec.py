@@ -759,8 +759,9 @@ class Decoder(Model):
         for ii in xrange(maxlen):
             # print(next_word)
             ctx = np.tile(context, [live_k, 1]) # copy context live_k times, into a list size=[live_k]
+            # view hypos as a batch
             next_prob, next_word, next_state \
-                = self.sample_next(next_word, next_state, ctx)  # wtf.
+                = self.sample_next(next_word, next_state, ctx)
 
             if stochastic:
                 # using stochastic sampling (or greedy sampling.)

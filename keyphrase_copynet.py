@@ -36,6 +36,7 @@ from collections import OrderedDict
 from fuel import datasets
 from fuel import transformers
 from fuel import schemes
+from feature_extractor import Feature
 
 setup = setup_keyphrase_all # setup_keyphrase_all_testing
 
@@ -137,16 +138,12 @@ def unk_filter(data):
 def add_padding(data):
     shapes = [np.asarray(sample).shape for sample in data]
     lengths = [shape[0] for shape in shapes]
-
     # make sure there's at least one zero at last to indicate the end of sentence <eol>
     max_sequence_length = max(lengths) + 1
     rest_shape = shapes[0][1:]
-    padded_batch = np.zeros(
-        (len(data), max_sequence_length) + rest_shape,
-        dtype='int32')
+    padded_batch = np.zeros((len(data), max_sequence_length) + rest_shape, dtype='int32')
     for i, sample in enumerate(data):
         padded_batch[i, :len(sample)] = sample
-
     return padded_batch
 
 
@@ -157,7 +154,6 @@ def split_into_multiple_and_padding(data_s_o, data_t_o):
         for p in t:
             data_s += [s]
             data_t += [p]
-
     data_s = add_padding(data_s)
     data_t = add_padding(data_t)
     return data_s, data_t
@@ -247,6 +243,14 @@ if __name__ == '__main__':
     ts_idx            = n_rng.permutation(test_size )[:2000].tolist()
     logger.info('load the data ok.')
 
+    # initialize feature extractors
+    if config['prior']:
+        config['batch_size'] = 1
+        feature_extractors = []
+        for feature_name in config['features']:
+            feature_extractor = Feature()  # TODO: build various feature extractors according to name
+            feature_extractors.append(feature_extractor)
+
     if config['do_train'] or config['do_predict']:
         # build the agent
         if config['copynet']:
@@ -326,9 +330,31 @@ if __name__ == '__main__':
                 data_t = train_data_target[data_ids]
 
                 # convert one data (with multiple targets) into multiple ones
-                data_s, data_t = split_into_multiple_and_padding(data_s, data_t)
+                data_s_padding, data_t_padding = split_into_multiple_and_padding(data_s, data_t)
 
-                # 2. Training
+                # 2. Do sampling
+                inputs_unk = np.asarray(unk_filter(np.asarray(data_s_padding[0], dtype='int32')), dtype='int32')
+                data_cand_single, score = agent.generate_multiple(inputs_unk[None, :], return_encoding=False)
+                
+                # 3. Calculate features and generate data for training graph
+                '''
+                input:  data_s_single --the id of input source text
+                        data_cand_single --candidates sampled from beam search
+                        data_t --golden keyphrases of this source text
+                output: features --2_d feature array in shape (n_cand + n_golden, n_features)
+                        ans_flag --flag array indicating correspoding target is a cand (False) or golden (True) phrase
+                '''
+                features = None
+                for feature_extractor in feature_extractors:
+                    feature = feature_extractor.get_feature(data_s[0], data_cand_single, data_t[0])
+                    if features is None:
+                        features = feature
+                    else:
+                        features = np.concatenate([features, feature], axis=1)
+                ans_flag = np.zeros((len(data_cand_single) + len(data_t_single), ), dtype='bool')
+                ans_flag[len(data_cand_single): ] = True
+
+                # 4. Training
                 '''
                 As the length of input varies often, it leads to frequent Out-of-Memory on GPU
                  Thus I have to segment each mini batch into mini-mini batches based on their lengths (number of words)
@@ -377,7 +403,7 @@ if __name__ == '__main__':
                 progbar.update(batch_id, [('loss_reg', mean_ll),
                                           ('ppl.', mean_ppl)])
 
-                # 3. Quick testing
+                # 5. Quick testing
                 if config['do_quick_testing'] and batch_id % 200 == 0 and batch_id > 1:
                     print_case = '-' * 100 +'\n'
 
@@ -424,7 +450,7 @@ if __name__ == '__main__':
                     with open(config['casestudy_log'], 'w+') as print_case_file:
                         print_case_file.write(print_case)
 
-                # 4. Test on validation data for a few batches, and do early-stopping if needed
+                # 6. Test on validation data for a few batches, and do early-stopping if needed
                 if do_validate and batch_id % 1000 == 0 and not (batch_id==0 and epoch==1):
                     logger.info('Validate @ epoch=%d, batch=%d' % (epoch, batch_id))
                     # 1. Prepare data
@@ -489,7 +515,7 @@ if __name__ == '__main__':
                         valid_param['valids_not_improved'] += 1
                         logger.info('Not improved for %s tests.' % valid_param['valids_not_improved'])
 
-                # 5. Save model
+                # 7. Save model
                 if batch_id % 1000 == 0 and batch_id > 1:
                     # save the weights every K rounds
                     agent.save(config['path_experiment'] + '/experiments.{0}.id={1}.epoch={2}.batch={3}.pkl'.format(config['task_name'], config['timemark'], epoch, batch_id))
@@ -500,7 +526,7 @@ if __name__ == '__main__':
                     print(optimizer_config)
                     # agent.save_weight_json(config['path_experiment'] + '/weight.print.id={0}.epoch={1}.batch={2}.json'.format(config['timemark'], epoch, batch_id))
 
-                # 6. Stop if exceed patience
+                # 8. Stop if exceed patience
                 if valid_param['valids_not_improved']  >= valid_param['patience']:
                     print("Not improved for %s epochs. Stopping..." % valid_param['valids_not_improved'])
                     valid_param['early_stop'] = True

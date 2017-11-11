@@ -151,6 +151,10 @@ def setup_keyphrase_all():
     config['coverage']        = True
     config['copygate']        = False
 
+    # Decoder: Prior
+    config['prior'] = True
+    config['features'] = ['LengthFeature'] # TODO: more features to be added
+
     # Decoder: Model
     config['shared_embed']    = False
     config['use_input']       = True
