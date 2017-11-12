@@ -1,3 +1,4 @@
+from __future__ import print_function, division
 import pickle
 import numpy as np
 from nltk.stem.porter import *
@@ -123,6 +124,52 @@ class KeyphrasenessFeature(Feature):
         feature[n_cand:] = np.asarray(map(lambda x:self.cal_kpn(x), goldens)).reshape((n_golden, 1))
         return feature
 
-class PositionFeature(Feature):
-    def __init__(self):
+class StopwordFeature(Feature):
+    def __init__(self, word2idx):
         super()
+        stopword_file = open('/home/yangan/projects/keyphrase/seq2seq-keyphrase/dataset/stopword/stopword_en.txt', "r")
+        stopword_set = set([w.strip() for w in stopword_file])
+        self.stopword_idxset = set()
+        for word in stopword_set:
+            if word in word2idx:
+                self.stopword_idxset.add(word)
+    
+    def has_stopword(self, phrase):
+        return np.any(map(lambda x: x in self.stopword_idxset, phrase))
+
+    def get_feature(self, source, cands, goldens):
+        # feature indicating whether phrase contains stopwords
+        n_cand = len(cands)
+        n_golden = len(goldens)
+        feature = np.zeros((n_cand + n_golden, 1), dtype="float32")
+        feature[:n_cand] = np.asarray(map(lambda x:self.has_stopword(x), cands), dtype="float32").reshape((n_cand, 1))
+        feature[n_cand:] = np.asarray(map(lambda x:self.has_stopword(x), goldens), dtype="float32").reshape((n_golden, 1))
+        return feature
+
+class PositionFeature(Feature):
+    def __init__(self, n_level = 5):
+        self.n_level = n_level
+
+    def cal_pos(self, phrase, source):
+        feat = np.zeros(self.n_level + 1)
+        # transform into string and find occurence, a little ugly...
+        phrase_id_str = " ".join([str(id) for id in phrase])
+        source_id_str = " ".join([str(id) for id in source])
+        pos = source_id_str.find(phrase_id_str)
+        if pos == -1: # phrase does not appear in source
+            feat[-1] = 1.
+        else:
+            offset = source_id_str[:pos].count(" ")
+            offset_level = int(offset / len(source) * self.n_level)
+            print(offset, offset_level)
+            feat[offset_level] = 1.
+        return feat
+
+    def get_feature(self, source, cands, goldens):
+        # (n_level + 1) features indicating whether and where the phrase appears in source text
+        n_cand = len(cands)
+        n_golden = len(goldens)
+        feature = np.zeros((n_cand + n_golden, self.n_level + 1), dtype="float32")
+        feature[:n_cand] = np.asarray(map(lambda x:self.cal_pos(x, source), cands), dtype="float32")
+        feature[n_cand:] = np.asarray(map(lambda x:self.cal_pos(x, source), goldens), dtype="float32")
+        return feature

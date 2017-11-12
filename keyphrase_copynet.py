@@ -4,6 +4,7 @@ import numpy as np
 import sys
 import copy
 import math
+from collections import Iterable
 
 import theano
 
@@ -118,21 +119,31 @@ def cc_martix(source, target):
                     cc[k][j][i] = 1.
     return cc
 
-def unk_filter(data):
+def unk_filter(data, unpad_input=False):
     '''
     only keep the top [voc_size] frequent words, replace the other as 0
     word index is in the order of from most frequent to least
-    :param data:
+    :param data: raw array/list of word idx
+           unpad_input: if True, indicating the input is in unpadded list type, else is array, default False
     :return:
     '''
-    if config['voc_size'] == -1:
-        return copy.copy(data)
+    if not unpad_input:
+        if config['voc_size'] == -1:
+            return copy.copy(data)
+        else:
+            # mask shows whether keeps each word (frequent) or not, only word_index<config['voc_size']=1, else=0
+            mask = (np.less(data, config['voc_size'])).astype(dtype='int32')
+            # low frequency word will be set to 1 (index of <unk>)
+            data = copy.copy(data * mask + (1 - mask))
+            return data
     else:
-        # mask shows whether keeps each word (frequent) or not, only word_index<config['voc_size']=1, else=0
-        mask = (np.less(data, config['voc_size'])).astype(dtype='int32')
-        # low frequency word will be set to 1 (index of <unk>)
-        data = copy.copy(data * mask + (1 - mask))
-        return data
+        filtered_data = []
+        for item in data:
+            if isinstance(item, Iterable): # list of list of wordid
+                filtered_data.append(map(lambda x:x if x <= config['voc_size'] else 1), item)
+            else: # list of wordid
+                filtered_data.append(item if item <= config['voc_size'] else 1)
+        return filtered_data
 
 
 def add_padding(data):
@@ -332,146 +343,57 @@ if __name__ == '__main__':
                 # convert one data (with multiple targets) into multiple ones
                 data_s_padding, data_t_padding = split_into_multiple_and_padding(data_s, data_t)
 
-                # 2. Do sampling
-                inputs_unk = np.asarray(unk_filter(np.asarray(data_s_padding[0], dtype='int32')), dtype='int32')
-                data_cand_single, score = agent.generate_multiple(inputs_unk[None, :], return_encoding=False)
-                
-                # 3. Calculate features and generate data for training graph
-                '''
-                input:  data_s_single --the id of input source text
-                        data_cand_single --candidates sampled from beam search
-                        data_t --golden keyphrases of this source text
-                output: features --2_d feature array in shape (n_cand + n_golden, n_features)
-                        ans_flag --flag array indicating correspoding target is a cand (False) or golden (True) phrase
-                '''
-                features = None
-                for feature_extractor in feature_extractors:
-                    feature = feature_extractor.get_feature(data_s[0], data_cand_single, data_t[0])
-                    if features is None:
-                        features = feature
-                    else:
-                        features = np.concatenate([features, feature], axis=1)
-                ans_flag = np.zeros((len(data_cand_single) + len(data_t_single), ), dtype='bool')
-                ans_flag[len(data_cand_single): ] = True
+                if config["prior"]:
+                    # 2. Do sampling
+                    inputs_unk = np.asarray(unk_filter(np.asarray(data_s_padding[0], dtype='int32')), dtype='int32')
+                    data_cand_single, score = agent.generate_multiple(inputs_unk[None, :], return_encoding=False)
+                    
+                    # 3. Calculate features and generate data for training graph
+                    '''
+                    input:  data_s_single --the id of input source text
+                            data_cand_single --candidates sampled from beam search
+                            data_t --golden keyphrases of this source text
+                    output: features --2_d feature array in shape (n_cand + n_golden, n_features)
+                            ans_flag --flag array indicating correspoding target is a cand (False) or golden (True) phrase
+                    '''
+                    features = None
+                    filtered_data_t = unk_filter(data_t[0], True) # list of list of wordid
+                    for feature_extractor in feature_extractors:
+                        feature = feature_extractor.get_feature(unk_filter(data_s[0], True), data_cand_single, filtered_data_t)
+                        if features is None:
+                            features = feature
+                        else:
+                            features = np.concatenate([features, feature], axis=1)
+                    ans_flag = np.zeros((len(data_cand_single) + len(data_t[0]), ), dtype='bool')
+                    ans_flag[len(data_cand_single): ] = True
 
-                # 4. Training
-                '''
-                As the length of input varies often, it leads to frequent Out-of-Memory on GPU
-                 Thus I have to segment each mini batch into mini-mini batches based on their lengths (number of words)
-                 It slows down the speed somehow, but avoids the break-down effectively
-                '''
-                loss_batch = []
+                    # 4. prepare a "batch"
+                    phrases = add_padding(data_cand_single + filtered_data_t) # array of array of wordid
+                    inputs = [inputs_unk, phrases, features, ans_flag] # an input "batch" to be fed into graph
 
-                mini_data_idx = 0
-                max_size = config['mini_mini_batch_length'] # max length (#words) of each mini-mini batch
-                stack_size = 0
-                mini_data_s = []
-                mini_data_t = []
-                while mini_data_idx < len(data_s):
-                    if len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) >= max_size:
-                        logger.error('mini_mini_batch_length is too small. Enlarge it to 2 times')
-                        max_size = len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) * 2
-                        config['mini_mini_batch_length'] = max_size
-
-                    # get a new mini-mini batch
-                    while mini_data_idx < len(data_s) and stack_size + len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) < max_size:
-                        mini_data_s.append(data_s[mini_data_idx])
-                        mini_data_t.append(data_t[mini_data_idx])
-                        stack_size += len(data_s[mini_data_idx]) * len(data_t[mini_data_idx])
-                        mini_data_idx += 1
-                    mini_data_s = np.asarray(mini_data_s)
-                    mini_data_t = np.asarray(mini_data_t)
-
-                    logger.info('Training minibatch %d/%d' % (mini_data_idx, len(data_s)))
-
+                    # 5. training
+                    loss_batch = []
                     # fit the mini-mini batch
                     if config['copynet']:
-                        data_c = cc_martix(mini_data_s, mini_data_t)
+                        data_c = cc_martix(inputs_unk, mini_data_t)
                         loss_batch += [agent.train_(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
                         # loss += [agent.train_guard(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
                     else:
                         loss_batch += [agent.train_(unk_filter(mini_data_s), unk_filter(mini_data_t))]
 
-                    mini_data_s = []
-                    mini_data_t = []
-                    stack_size  = 0
+                else:
+                    # 2. Training
+                    '''
+                    As the length of input varies often, it leads to frequent Out-of-Memory on GPU
+                    Thus I have to segment each mini batch into mini-mini batches based on their lengths (number of words)
+                    It slows down the speed somehow, but avoids the break-down effectively
+                    '''
+                    data_s, data_t = split_into_multiple_and_padding(data_s, data_t)
 
-                # average the training loss and print progress
-                mean_ll  = np.average(np.concatenate([l[0] for l in loss_batch]))
-                mean_ppl = np.average(np.concatenate([l[1] for l in loss_batch]))
-                loss.append([mean_ll, mean_ppl])
-                progbar.update(batch_id, [('loss_reg', mean_ll),
-                                          ('ppl.', mean_ppl)])
-
-                # 5. Quick testing
-                if config['do_quick_testing'] and batch_id % 200 == 0 and batch_id > 1:
-                    print_case = '-' * 100 +'\n'
-
-                    logger.info('Echo={} Evaluation Sampling.'.format(batch_id))
-                    print_case += 'Echo={} Evaluation Sampling.\n'.format(batch_id)
-
-                    logger.info('generating [training set] samples')
-                    print_case += 'generating [training set] samples\n'
-
-                    for _ in range(1):
-                        idx              = int(np.floor(n_rng.rand() * train_size))
-
-                        test_s_o, test_t_o = train_data_plain[idx]
-
-                        if not config['multi_output']:
-                            # create <abs, phrase> pair for each phrase
-                            test_s, test_t = split_into_multiple_and_padding([test_s_o], [test_t_o])
-
-                        inputs_unk = np.asarray(unk_filter(np.asarray(test_s[0], dtype='int32')), dtype='int32')
-                        prediction, score = agent.generate_multiple(inputs_unk[None, :])
-
-                        outs, metrics = agent.evaluate_multiple([test_s[0]], [test_t],
-                                                                [test_s_o], [test_t_o],
-                                                                [prediction], [score],
-                                                                idx2word)
-                        print('*' * 50)
-
-                    logger.info('generating [testing set] samples')
-                    for _ in range(1):
-                        idx            = int(np.floor(n_rng.rand() * test_size))
-                        test_s_o, test_t_o = test_data_plain[idx]
-                        if not config['multi_output']:
-                            test_s, test_t = split_into_multiple_and_padding([test_s_o], [test_t_o])
-
-                        inputs_unk = np.asarray(unk_filter(np.asarray(test_s[0], dtype='int32')), dtype='int32')
-                        prediction, score = agent.generate_multiple(inputs_unk[None, :], return_all=False)
-
-                        outs, metrics = agent.evaluate_multiple([test_s[0]], [test_t],
-                                                                [test_s_o], [test_t_o],
-                                                                [prediction], [score],
-                                                                idx2word)
-                        print('*' * 50)
-                    # write examples to log file
-                    with open(config['casestudy_log'], 'w+') as print_case_file:
-                        print_case_file.write(print_case)
-
-                # 6. Test on validation data for a few batches, and do early-stopping if needed
-                if do_validate and batch_id % 1000 == 0 and not (batch_id==0 and epoch==1):
-                    logger.info('Validate @ epoch=%d, batch=%d' % (epoch, batch_id))
-                    # 1. Prepare data
-                    data_s = np.array(validation_set['source'])[:config['validation_size']]
-                    data_t = np.array(validation_set['target'])[:config['validation_size']]
-
-                    # if len(data_s) > 2000:
-                    #     data_s = data_s[:2000]
-                    #     data_t = data_t[:2000]
-                    # if not multi_output, split one data (with multiple targets) into multiple ones
-                    if not config['multi_output']:
-                        data_s, data_t = split_into_multiple_and_padding(data_s, data_t)
-
-                    loss_valid = []
-
-                    # for minibatch_id in range(int(math.ceil(len(data_s)/config['mini_batch_size']))):
-                    #     mini_data_s = data_s[minibatch_id * config['mini_batch_size']:min((minibatch_id + 1) * config['mini_batch_size'], len(data_s))]
-                    #     mini_data_t = data_t[minibatch_id * config['mini_batch_size']:min((minibatch_id + 1) * config['mini_batch_size'], len(data_t))]
+                    loss_batch = []
 
                     mini_data_idx = 0
-                    max_size = config['mini_mini_batch_length']
+                    max_size = config['mini_mini_batch_length'] # max length (#words) of each mini-mini batch
                     stack_size = 0
                     mini_data_s = []
                     mini_data_t = []
@@ -481,6 +403,7 @@ if __name__ == '__main__':
                             max_size = len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) * 2
                             config['mini_mini_batch_length'] = max_size
 
+                        # get a new mini-mini batch
                         while mini_data_idx < len(data_s) and stack_size + len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) < max_size:
                             mini_data_s.append(data_s[mini_data_idx])
                             mini_data_t.append(data_t[mini_data_idx])
@@ -489,48 +412,155 @@ if __name__ == '__main__':
                         mini_data_s = np.asarray(mini_data_s)
                         mini_data_t = np.asarray(mini_data_t)
 
+                        logger.info('Training minibatch %d/%d' % (mini_data_idx, len(data_s)))
+
+                        # fit the mini-mini batch
                         if config['copynet']:
                             data_c = cc_martix(mini_data_s, mini_data_t)
-                            loss_valid += [agent.validate_(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
+                            loss_batch += [agent.train_(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
+                            # loss += [agent.train_guard(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
                         else:
-                            loss_valid += [agent.validate_(unk_filter(mini_data_s), unk_filter(mini_data_t))]
-
-                        if mini_data_idx % 100 == 0:
-                            print('\t %d / %d' % (mini_data_idx, math.ceil(len(data_s))))
+                            loss_batch += [agent.train_(unk_filter(mini_data_s), unk_filter(mini_data_t))]
 
                         mini_data_s = []
                         mini_data_t = []
+                        stack_size  = 0
+
+                    # average the training loss and print progress
+                    mean_ll  = np.average(np.concatenate([l[0] for l in loss_batch]))
+                    mean_ppl = np.average(np.concatenate([l[1] for l in loss_batch]))
+                    loss.append([mean_ll, mean_ppl])
+                    progbar.update(batch_id, [('loss_reg', mean_ll),
+                                            ('ppl.', mean_ppl)])
+
+                    # 5. Quick testing
+                    if config['do_quick_testing'] and batch_id % 200 == 0 and batch_id > 1:
+                        print_case = '-' * 100 +'\n'
+
+                        logger.info('Echo={} Evaluation Sampling.'.format(batch_id))
+                        print_case += 'Echo={} Evaluation Sampling.\n'.format(batch_id)
+
+                        logger.info('generating [training set] samples')
+                        print_case += 'generating [training set] samples\n'
+
+                        for _ in range(1):
+                            idx              = int(np.floor(n_rng.rand() * train_size))
+
+                            test_s_o, test_t_o = train_data_plain[idx]
+
+                            if not config['multi_output']:
+                                # create <abs, phrase> pair for each phrase
+                                test_s, test_t = split_into_multiple_and_padding([test_s_o], [test_t_o])
+
+                            inputs_unk = np.asarray(unk_filter(np.asarray(test_s[0], dtype='int32')), dtype='int32')
+                            prediction, score = agent.generate_multiple(inputs_unk[None, :])
+
+                            outs, metrics = agent.evaluate_multiple([test_s[0]], [test_t],
+                                                                    [test_s_o], [test_t_o],
+                                                                    [prediction], [score],
+                                                                    idx2word)
+                            print('*' * 50)
+
+                        logger.info('generating [testing set] samples')
+                        for _ in range(1):
+                            idx            = int(np.floor(n_rng.rand() * test_size))
+                            test_s_o, test_t_o = test_data_plain[idx]
+                            if not config['multi_output']:
+                                test_s, test_t = split_into_multiple_and_padding([test_s_o], [test_t_o])
+
+                            inputs_unk = np.asarray(unk_filter(np.asarray(test_s[0], dtype='int32')), dtype='int32')
+                            prediction, score = agent.generate_multiple(inputs_unk[None, :], return_all=False)
+
+                            outs, metrics = agent.evaluate_multiple([test_s[0]], [test_t],
+                                                                    [test_s_o], [test_t_o],
+                                                                    [prediction], [score],
+                                                                    idx2word)
+                            print('*' * 50)
+                        # write examples to log file
+                        with open(config['casestudy_log'], 'w+') as print_case_file:
+                            print_case_file.write(print_case)
+
+                    # 6. Test on validation data for a few batches, and do early-stopping if needed
+                    if do_validate and batch_id % 1000 == 0 and not (batch_id==0 and epoch==1):
+                        logger.info('Validate @ epoch=%d, batch=%d' % (epoch, batch_id))
+                        # 1. Prepare data
+                        data_s = np.array(validation_set['source'])[:config['validation_size']]
+                        data_t = np.array(validation_set['target'])[:config['validation_size']]
+
+                        # if len(data_s) > 2000:
+                        #     data_s = data_s[:2000]
+                        #     data_t = data_t[:2000]
+                        # if not multi_output, split one data (with multiple targets) into multiple ones
+                        if not config['multi_output']:
+                            data_s, data_t = split_into_multiple_and_padding(data_s, data_t)
+
+                        loss_valid = []
+
+                        # for minibatch_id in range(int(math.ceil(len(data_s)/config['mini_batch_size']))):
+                        #     mini_data_s = data_s[minibatch_id * config['mini_batch_size']:min((minibatch_id + 1) * config['mini_batch_size'], len(data_s))]
+                        #     mini_data_t = data_t[minibatch_id * config['mini_batch_size']:min((minibatch_id + 1) * config['mini_batch_size'], len(data_t))]
+
+                        mini_data_idx = 0
+                        max_size = config['mini_mini_batch_length']
                         stack_size = 0
+                        mini_data_s = []
+                        mini_data_t = []
+                        while mini_data_idx < len(data_s):
+                            if len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) >= max_size:
+                                logger.error('mini_mini_batch_length is too small. Enlarge it to 2 times')
+                                max_size = len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) * 2
+                                config['mini_mini_batch_length'] = max_size
 
-                    mean_ll = np.average(np.concatenate([l[0] for l in loss_valid]))
-                    mean_ppl = np.average(np.concatenate([l[1] for l in loss_valid]))
-                    logger.info('\tPrevious best score: \t ll=%f, \t ppl=%f' % (valid_param['valid_best_score'][0], valid_param['valid_best_score'][1]))
-                    logger.info('\tCurrent score: \t ll=%f, \t ppl=%f' % (mean_ll, mean_ppl))
+                            while mini_data_idx < len(data_s) and stack_size + len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) < max_size:
+                                mini_data_s.append(data_s[mini_data_idx])
+                                mini_data_t.append(data_t[mini_data_idx])
+                                stack_size += len(data_s[mini_data_idx]) * len(data_t[mini_data_idx])
+                                mini_data_idx += 1
+                            mini_data_s = np.asarray(mini_data_s)
+                            mini_data_t = np.asarray(mini_data_t)
 
-                    if mean_ll < valid_param['valid_best_score'][0]:
-                        valid_param['valid_best_score'] = (mean_ll, mean_ppl)
-                        logger.info('New best score')
-                        valid_param['valids_not_improved'] = 0
-                    else:
-                        valid_param['valids_not_improved'] += 1
-                        logger.info('Not improved for %s tests.' % valid_param['valids_not_improved'])
+                            if config['copynet']:
+                                data_c = cc_martix(mini_data_s, mini_data_t)
+                                loss_valid += [agent.validate_(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
+                            else:
+                                loss_valid += [agent.validate_(unk_filter(mini_data_s), unk_filter(mini_data_t))]
 
-                # 7. Save model
-                if batch_id % 1000 == 0 and batch_id > 1:
-                    # save the weights every K rounds
-                    agent.save(config['path_experiment'] + '/experiments.{0}.id={1}.epoch={2}.batch={3}.pkl'.format(config['task_name'], config['timemark'], epoch, batch_id))
+                            if mini_data_idx % 100 == 0:
+                                print('\t %d / %d' % (mini_data_idx, math.ceil(len(data_s))))
 
-                    # save the game(training progress) in case of interrupt!
-                    optimizer_config = agent.optimizer.get_config()
-                    serialize_to_file([name_ordering, batch_id, loss, valid_param, optimizer_config], config['path_experiment'] + '/save_training_status.id={0}.epoch={1}.batch={2}.pkl'.format(config['timemark'], epoch, batch_id))
-                    print(optimizer_config)
-                    # agent.save_weight_json(config['path_experiment'] + '/weight.print.id={0}.epoch={1}.batch={2}.json'.format(config['timemark'], epoch, batch_id))
+                            mini_data_s = []
+                            mini_data_t = []
+                            stack_size = 0
 
-                # 8. Stop if exceed patience
-                if valid_param['valids_not_improved']  >= valid_param['patience']:
-                    print("Not improved for %s epochs. Stopping..." % valid_param['valids_not_improved'])
-                    valid_param['early_stop'] = True
-                    break
+                        mean_ll = np.average(np.concatenate([l[0] for l in loss_valid]))
+                        mean_ppl = np.average(np.concatenate([l[1] for l in loss_valid]))
+                        logger.info('\tPrevious best score: \t ll=%f, \t ppl=%f' % (valid_param['valid_best_score'][0], valid_param['valid_best_score'][1]))
+                        logger.info('\tCurrent score: \t ll=%f, \t ppl=%f' % (mean_ll, mean_ppl))
+
+                        if mean_ll < valid_param['valid_best_score'][0]:
+                            valid_param['valid_best_score'] = (mean_ll, mean_ppl)
+                            logger.info('New best score')
+                            valid_param['valids_not_improved'] = 0
+                        else:
+                            valid_param['valids_not_improved'] += 1
+                            logger.info('Not improved for %s tests.' % valid_param['valids_not_improved'])
+
+                    # 7. Save model
+                    if batch_id % 1000 == 0 and batch_id > 1:
+                        # save the weights every K rounds
+                        agent.save(config['path_experiment'] + '/experiments.{0}.id={1}.epoch={2}.batch={3}.pkl'.format(config['task_name'], config['timemark'], epoch, batch_id))
+
+                        # save the game(training progress) in case of interrupt!
+                        optimizer_config = agent.optimizer.get_config()
+                        serialize_to_file([name_ordering, batch_id, loss, valid_param, optimizer_config], config['path_experiment'] + '/save_training_status.id={0}.epoch={1}.batch={2}.pkl'.format(config['timemark'], epoch, batch_id))
+                        print(optimizer_config)
+                        # agent.save_weight_json(config['path_experiment'] + '/weight.print.id={0}.epoch={1}.batch={2}.json'.format(config['timemark'], epoch, batch_id))
+
+                    # 8. Stop if exceed patience
+                    if valid_param['valids_not_improved']  >= valid_param['patience']:
+                        print("Not improved for %s epochs. Stopping..." % valid_param['valids_not_improved'])
+                        valid_param['early_stop'] = True
+                        break
 
     '''
     test accuracy and f-score at the end of each epoch
