@@ -21,6 +21,40 @@ RNN    = GRU             # change it here for other RNN models.
 err    = 1e-9
 
 
+class Loglinear(Model):
+    def __init__(self, config, rng, prefix='ll'):
+        super(Loglinear, self).__init__()
+        self.config = config
+        self.rng = rng
+        self.prefix = prefix
+        self.name = prefix
+    
+        logger.info("{}_create scoring layer.".format(self.prefix))
+        self.Scorer = Dense(
+            config['feature_dim'],
+            1,
+            activation='linear',
+            name="{}_init".format(self.prefix)
+        )
+        self._add(self.Scorer)
+        logger.info("create loglinear model ok.")
+    
+    def build_loglinear(self, phrases):
+        '''
+        Input:
+            phrases: feature vectors of cand and golden phrases, shape=[n_cand + n_golden, feature_dim]
+        Return:
+            scores: scores (log unnormalized probabilities) of phrases, shape=[n_cand + n_golden]
+        '''
+        scores = self.Scorer(phrases) # 2-D array
+        scores = T.reshape(scores, (-1, )) # flatten into 1-D score array
+        return scores
+
+    def compile_scorer(self):
+        features = T.matrix()
+        self.calscore = theano.function([features], 
+                                        self.build_loglinear(features))
+
 class Encoder(Model):
     """
     Recurrent Neural Network-based Encoder
@@ -1759,8 +1793,13 @@ class NRM(Model):
             self.decoder = DecoderAtt(self.config, self.rng, prefix='dec', mode=self.mode,
                                       copynet=self.copynet, identity=self.identity)
 
+        if self.config['prior']:
+            self.loglinear = Loglinear(self.config, self.rng, prefix='ll')
+
         self._add(self.encoder)
         self._add(self.decoder)
+        if self.config['prior']:
+            self._add(self.loglinear)
 
         # objectives and optimizers
         if self.config['optimizer'] == 'adam':
@@ -1791,7 +1830,10 @@ class NRM(Model):
         logger.info("total number of the parameters of the model: {}".format(param_num))
 
         if mode == 'train' or mode == 'all':
-            self.compile_train()
+            if self.config["prior"]:
+                self.compile_train_prior()
+            else:
+                self.compile_train()
 
         if mode == 'display' or mode == 'all':
             self.compile_sample()
@@ -1859,6 +1901,79 @@ class NRM(Model):
         #
         # # compiling monitoring
         # self.compile_monitoring(train_inputs)
+
+    def compile_train_prior(self):
+
+        # questions (theano variables)
+        inputs    = T.imatrix()  # padded input word sequence (for training)
+        target    = T.imatrix()  # padded target word sequence (for training)
+        cc_matrix = T.tensor3()
+        features = T.matrix()
+        ans = T.bvector()
+
+        # encoding & decoding
+
+        code, _, c_mask, _ = self.encoder.build_encoder(inputs, None, return_sequence=True, return_embed=True)
+        # code: (nb_samples, max_len, contxt_dim)
+
+        # self.decoder.build_decoder(target, cc_matrix, code, c_mask)
+        #       feed target(index vector of target), cc_matrix(copy matrix), code(encoding of source text), c_mask (mask of source text) into decoder, get objective value
+        #       logPxz,logPPL are tensors in [nb_samples,1], cross-entropy and Perplexity of each sample
+        # normal seq2seq
+        logPxz, logPPL     = self.decoder.build_decoder(target, cc_matrix, code, c_mask)
+        logPxz = T.reshape(logPxz, (-1, ))
+
+        loglinear_scores = self.loglinear.build_loglinear(features)
+        
+        loss_negll = T.sum(-logPxz * ans) / T.sum(ans) # calculate neg_ll for golden phrases
+
+        cost_per_sample = -logPxz * self.config['alpha']
+        cost_min = cost_per_sample - cost_per_sample.min()
+        probs = T.exp(-cost_min)
+        log_probP = -cost_min - T.log(probs.sum()) # log probs for distribution P
+
+        loglinear_scores_min = loglinear_scores - loglinear_scores.max()
+        probs_q = T.exp(loglinear_scores_min)
+        log_probQ = loglinear_scores_min - T.log(probs_q.sum()) # log probs for distribution Q
+
+        loss_KL_sample = T.exp(log_probQ) * (log_probQ - log_probP) 
+        loss_KL = loss_KL_sample.sum() # calculate KL dist between Q and P
+
+        # responding loss
+        loss_rec = loss_negll
+        loss_ppl = T.exp(-logPPL)
+        loss     = self.config['lambda_1'] * loss_negll + self.config['lambda_2'] * loss_KL
+
+        updates  = self.optimizer.get_updates(self.params, loss)
+
+        logger.info("compiling the compuational graph ::training function::")
+
+        # input contains inputs, target and cc_matrix
+        train_inputs = [inputs, target, cc_matrix, features, ans]
+
+        self.train_ = theano.function(train_inputs,
+                                      [loss_rec, loss_ppl, loss],
+                                      updates=updates,
+                                      name='train_fun',
+                                      allow_input_downcast=True)
+        self.train_guard = theano.function(train_inputs,
+                                      [loss_rec, loss_ppl, loss],
+                                      updates=updates,
+                                      name='train_nanguard_fun',
+                                      mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True))
+        self.validate_ = theano.function(train_inputs,
+                                      [loss_rec, loss_ppl, loss],
+                                      name='validate_fun',
+                                      allow_input_downcast=True)
+
+        logger.info("training functions compile done.")
+
+        # # add monitoring:
+        # self.monitor['context'] = context
+        # self._monitoring()
+        #
+        # # compiling monitoring
+        # self.compile_monitoring(train_inputs)    
 
     def compile_sample(self):
         if not self.attend:

@@ -111,6 +111,8 @@ def cc_martix(source, target):
     '''
     return the copy matrix, size = [nb_sample, max_len_source, max_len_target]
     '''
+    if source.ndim == 1: # when training in prior mode
+        source = np.repeat(np.expand_dims(source, axis=0), target.shape[0], axis=0)
     cc = np.zeros((source.shape[0], target.shape[1], source.shape[1]), dtype='float32')
     for k in range(source.shape[0]): # go over each sample in source batch
         for j in range(target.shape[1]): # go over each word in target (all target have same length after padding)
@@ -375,7 +377,7 @@ if __name__ == '__main__':
                     loss_batch = []
                     # fit the mini-mini batch
                     if config['copynet']:
-                        data_c = cc_martix(inputs_unk, mini_data_t)
+                        data_c = cc_martix(inputs_unk, phrases)
                         loss_batch += [agent.train_(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
                         # loss += [agent.train_guard(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
                     else:

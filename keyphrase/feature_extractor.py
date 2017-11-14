@@ -15,7 +15,7 @@ class Feature(object):
 class TfidfFeature(Feature):
     def __init__(self, idx2word, stem=True, filter_unk=False): 
         # filter_unk incicates whether consider unk word when summarizing tf dict, only work when stem=True
-        super()
+        super(TfidfFeature, self).__init__()
         self.stem = stem # indicate whether to do stemming
         # load pre-calculated df dictionary
         if self.stem:
@@ -76,7 +76,7 @@ class LengthFeature(Feature):
     def __init__(self, max_length=6):
         # (1 + max_length) 0-1 features indicating phrase with correspoding length (0~max_len), phrases longer than max_len are regarded as max_len
         # there is a feature for empty phrase, which may be the case sometimes
-        super()
+        super(LengthFeature, self).__init__()
         self.max_length = max_length
     
     def get_feature(self, source, cands, goldens):
@@ -90,7 +90,7 @@ class LengthFeature(Feature):
 
 class KeyphrasenessFeature(Feature):
     def __init__(self, idx2word, stem=True):
-        super()
+        super(KeyphrasenessFeature, self).__init__()
         self.stem = stem
         if self.stem:
             fin = open("/home/yangan/projects/keywords/seq2seq-keyphrase/dataset/keyphrase/punctuation-20000validation-20000testing/kpn_dict_stem.pkl", 'rb')
@@ -126,7 +126,7 @@ class KeyphrasenessFeature(Feature):
 
 class StopwordFeature(Feature):
     def __init__(self, word2idx):
-        super()
+        super(StopwordFeature, self).__init__()
         stopword_file = open('/home/yangan/projects/keyphrase/seq2seq-keyphrase/dataset/stopword/stopword_en.txt', "r")
         stopword_set = set([w.strip() for w in stopword_file])
         self.stopword_idxset = set()

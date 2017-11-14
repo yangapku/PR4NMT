@@ -153,7 +153,14 @@ def setup_keyphrase_all():
 
     # Decoder: Prior
     config['prior'] = True
-    config['features'] = ['LengthFeature'] # TODO: more features to be added
+    config['features'] = ['LengthFeature', ] # TODO: more features to be added
+    config['n_level'] = 5 # used in Position feature
+    config['feature_dim'] = 1 + (config['max_len'] + 1) + 1 + 1 + (config['n_level'] + 1)
+    config['candidate_size'] = 10
+    config['lambda_1'] = 8e-5
+    config['lambda_2'] = 2.5e-4
+    config['alpha'] = 0.2
+
 
     # Decoder: Model
     config['shared_embed']    = False
