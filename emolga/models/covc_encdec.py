@@ -1940,7 +1940,7 @@ class NRM(Model):
         loss_KL = loss_KL_sample.sum() # calculate KL dist between Q and P
 
         # responding loss
-        loss_rec = loss_negll
+        loss_rec = -logPxz
         loss_ppl = T.exp(-logPPL)
         loss     = self.config['lambda_1'] * loss_negll + self.config['lambda_2'] * loss_KL
 
@@ -1949,7 +1949,7 @@ class NRM(Model):
         logger.info("compiling the compuational graph ::training function::")
 
         # input contains inputs, target and cc_matrix
-        train_inputs = [inputs, target, cc_matrix, features, ans]
+        train_inputs = [inputs, target, features, ans, cc_matrix]
 
         self.train_ = theano.function(train_inputs,
                                       [loss_rec, loss_ppl, loss],

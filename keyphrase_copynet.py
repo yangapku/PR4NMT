@@ -182,6 +182,11 @@ def build_data(data):
     return dataset
 
 
+def strip(cand):
+    if cand[-1] == 0:
+        cand.pop()
+    return cand
+
 if __name__ == '__main__':
 
     # prepare logging.
@@ -356,7 +361,7 @@ if __name__ == '__main__':
                     # 2. Do sampling
                     inputs_unk = np.asarray(unk_filter(np.asarray(data_s_padding[0], dtype='int32')), dtype='int32')
                     data_cand_single, score = agent.generate_multiple(inputs_unk[None, :], return_encoding=False, for_priorsample=True)
-                    
+                    data_cand_single = [strip(cand) for cand in data_cand_single] # strip the zero at the end
                     # 3. Calculate features and generate data for training graph
                     '''
                     input:  data_s_single --the id of input source text
@@ -391,7 +396,9 @@ if __name__ == '__main__':
                         # loss += [agent.train_guard(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
                     else:
                         pass # TODO: prior training for vanila RNNsearch
-                    
+                    print(loss_batch)
+                    loss_batch[0][0] = loss_batch[0][0][len(data_cand_single):]
+                    loss_batch[0][1] = loss_batch[0][1][len(data_cand_single):]
                     mean_ll  = np.average(np.concatenate([l[0] for l in loss_batch]))
                     mean_ppl = np.average(np.concatenate([l[1] for l in loss_batch]))
                     loss.append([mean_ll, mean_ppl])

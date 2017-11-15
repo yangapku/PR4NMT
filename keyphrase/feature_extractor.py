@@ -60,13 +60,13 @@ class TfidfFeature(Feature):
         source_counter = self.count_source(source)
         for idx in range(n_cand):
             tfidf = 0.
-            for word in n_cand[idx]:
+            for word in cands[idx]:
                 if word > 1: # ignore <eol> and <unk>
                     tfidf += -1. * self.calc_tf(word, source_counter) * np.log2((1.0 + self.calc_df(word)) / (1. * self.n_doc))
             feature[idx, 0] = tfidf
         for idx in range(n_golden):
             tfidf = 0.
-            for word in n_cand[idx]:
+            for word in goldens[idx]:
                 if word > 1: # ignore <eol> and <unk>
                     tfidf += -1. * self.calc_tf(word, source_counter) * np.log2((1.0 + self.calc_df(word)) / (1. * self.n_doc))
             feature[idx + n_cand, 0] = tfidf
@@ -161,7 +161,6 @@ class PositionFeature(Feature):
         else:
             offset = source_id_str[:pos].count(" ")
             offset_level = int(offset / len(source) * self.n_level)
-            print(offset, offset_level)
             feat[offset_level] = 1.
         return feat
 
