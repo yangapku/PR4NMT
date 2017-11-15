@@ -12,8 +12,8 @@ def setup_keyphrase_all():
     '''
     config['seed']            = 154316847
     # for naming the outputs and logs
-    config['model_name']      = 'RNN' # 'TfIdf', 'TextRank', 'SingleRank', 'ExpandRank', 'Maui', 'Kea', 'RNN', 'CopyRNN'
-    config['task_name']       = 'rerun-vanila10.26'
+    config['model_name']      = 'CopyPrior' # 'TfIdf', 'TextRank', 'SingleRank', 'ExpandRank', 'Maui', 'Kea', 'RNN', 'CopyRNN'
+    config['task_name']       = 'prior11.15'
     config['timemark']        = time.strftime('%Y%m%d-%H%M%S', time.localtime(time.time()))
 
     config['path']            = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)) #path.realpath(path.curdir)
@@ -67,6 +67,7 @@ def setup_keyphrase_all():
     config['testing_id']      = config['path'] + '/dataset/keyphrase/'+config['data_process_name']+'testing_id_'+str(config['validation_size'])+'.pkl'
     config['dataset']         = config['path'] + '/dataset/keyphrase/'+config['data_process_name']+'all_600k_dataset.pkl'
     config['voc']             = config['path'] + '/dataset/keyphrase/'+config['data_process_name']+'all_600k_voc.pkl' # for manual check
+
     # Optimization
     config['use_noise']       = False
     config['optimizer']       = 'adam'
@@ -144,23 +145,12 @@ def setup_keyphrase_all():
                                 else 2 * config['enc_hidden_dim']
 
     # Decoder: CopyNet
-    config['copynet']         = False
+    config['copynet']         = True
     # config['copynet']         = False
     config['identity']        = False
     config['location_embed']  = True
     config['coverage']        = True
     config['copygate']        = False
-
-    # Decoder: Prior
-    config['prior'] = True
-    config['features'] = ['TfidfFeature', 'LengthFeature', 'KeyphrasenessFeature', 'StopwordFeature', 'PositionFeature'] # TODO: more features to be added
-    config['n_level'] = 5 # used in Position feature
-    config['feature_dim'] = 1 + (config['max_len'] + 1) + 1 + 1 + (config['n_level'] + 1)
-    config['candidate_size'] = 20
-    config['lambda_1'] = 8e-5
-    config['lambda_2'] = 2.5e-4
-    config['alpha'] = 0.2
-
 
     # Decoder: Model
     config['shared_embed']    = False
