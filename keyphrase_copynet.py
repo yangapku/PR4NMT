@@ -142,7 +142,7 @@ def unk_filter(data, unpad_input=False):
         filtered_data = []
         for item in data:
             if isinstance(item, Iterable): # list of list of wordid
-                filtered_data.append(map(lambda x:x if x <= config['voc_size'] else 1), item)
+                filtered_data.append(map(lambda x:x if x <= config['voc_size'] else 1, item))
             else: # list of wordid
                 filtered_data.append(item if item <= config['voc_size'] else 1)
         return filtered_data

@@ -127,7 +127,7 @@ class KeyphrasenessFeature(Feature):
 class StopwordFeature(Feature):
     def __init__(self, word2idx):
         super(StopwordFeature, self).__init__()
-        stopword_file = open('/home/yangan/projects/keyphrase/seq2seq-keyphrase/dataset/stopword/stopword_en.txt', "r")
+        stopword_file = open('/home/yangan/projects/keywords/seq2seq-keyphrase/dataset/stopword/stopword_en.txt', "r")
         stopword_set = set([w.strip() for w in stopword_file])
         self.stopword_idxset = set()
         for word in stopword_set:

@@ -59,11 +59,11 @@ class Optimizer(object):
             # for prior params, not do clipping
             square_sum = None
             for i in range(len(grads)):
-                if params[i].name.beginswith('ll'):
+                if params[i].name.startswith('ll'):
                     continue
                 square_sum = T.sum(grads[i] ** 2) if square_sum is None else (square_sum + T.sum(grads[i] ** 2))
             norm = T.sqrt(square_sum)
-            grads = [clip_norm(grads[i], self.clipnorm, norm) if not params[i].name.beginswith('ll') else grads[i] for i in range(len(grads))]
+            grads = [clip_norm(grads[i], self.clipnorm, norm) if not params[i].name.startswith('ll') else grads[i] for i in range(len(grads))]
         else:
             print('not use gradient clipping!!')
 
