@@ -56,8 +56,14 @@ class Optimizer(object):
         if hasattr(self, 'clipnorm') and self.clipnorm > 0:
             print('use gradient clipping!!')
             print('clipnorm = %f' % self.clipnorm)
-            norm = T.sqrt(sum([T.sum(g ** 2) for g in grads]))
-            grads = [clip_norm(g, self.clipnorm, norm) for g in grads]
+            # for prior params, not do clipping
+            square_sum = None
+            for i in range(len(grads)):
+                if params[i].name.beginswith('ll'):
+                    continue
+                square_sum = T.sum(grads[i] ** 2) if square_sum is None else (square_sum + T.sum(grads[i] ** 2))
+            norm = T.sqrt(square_sum)
+            grads = [clip_norm(grads[i], self.clipnorm, norm) if not params[i].name.beginswith('ll') else grads[i] for i in range(len(grads))]
         else:
             print('not use gradient clipping!!')
 

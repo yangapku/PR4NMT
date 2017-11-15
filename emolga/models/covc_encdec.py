@@ -34,7 +34,7 @@ class Loglinear(Model):
             config['feature_dim'],
             1,
             activation='linear',
-            name="{}_init".format(self.prefix)
+            name="{}_dense".format(self.prefix)
         )
         self._add(self.Scorer)
         logger.info("create loglinear model ok.")
@@ -2031,10 +2031,10 @@ class NRM(Model):
         return sample, np.exp(score), ppp
 
 
-    def generate_multiple(self, inputs, mode='display', return_attend=False, return_all=True, return_encoding=False):
+    def generate_multiple(self, inputs, mode='display', return_attend=False, return_all=True, return_encoding=False, for_priorsample=False):
         # assert self.config['sample_stoch'], 'RNNLM sampling must be stochastic'
         # assert not self.config['sample_argmax'], 'RNNLM sampling cannot use argmax'
-        args = dict(k=self.config['sample_beam'],
+        args = dict(k=self.config['sample_beam'] if not for_priorsample else self.config['candidate_size'],
                     maxlen=self.config['max_len'],
                     stochastic=self.config['sample_stoch'] if mode == 'display' else None,
                     argmax=self.config['sample_argmax'] if mode == 'display' else None,

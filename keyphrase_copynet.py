@@ -37,7 +37,7 @@ from collections import OrderedDict
 from fuel import datasets
 from fuel import transformers
 from fuel import schemes
-from feature_extractor import Feature
+from keyphrase.feature_extractor import *
 
 setup = setup_keyphrase_all # setup_keyphrase_all_testing
 
@@ -260,9 +260,16 @@ if __name__ == '__main__':
     if config['prior']:
         config['batch_size'] = 1
         feature_extractors = []
-        for feature_name in config['features']:
-            feature_extractor = Feature()  # TODO: build various feature extractors according to name
-            feature_extractors.append(feature_extractor)
+        if 'TfidfFeature' in config['features']:
+            feature_extractors.append(TfidfFeature(idx2word))
+        if 'LengthFeature' in config['features']:
+            feature_extractors.append(LengthFeature(max_length=config['max_len']))
+        if 'KeyphrasenessFeature' in config['features']:
+            feature_extractors.append(KeyphrasenessFeature(idx2word))
+        if 'StopwordFeature' in config['features']:
+            feature_extractors.append(StopwordFeature(word2idx))
+        if 'PositionFeature' in config['features']:
+            feature_extractors.append(PositionFeature(config['n_level']))
 
     if config['do_train'] or config['do_predict']:
         # build the agent
@@ -348,7 +355,7 @@ if __name__ == '__main__':
                 if config["prior"]:
                     # 2. Do sampling
                     inputs_unk = np.asarray(unk_filter(np.asarray(data_s_padding[0], dtype='int32')), dtype='int32')
-                    data_cand_single, score = agent.generate_multiple(inputs_unk[None, :], return_encoding=False)
+                    data_cand_single, score = agent.generate_multiple(inputs_unk[None, :], return_encoding=False, for_priorsample=True)
                     
                     # 3. Calculate features and generate data for training graph
                     '''
@@ -359,9 +366,9 @@ if __name__ == '__main__':
                             ans_flag --flag array indicating correspoding target is a cand (False) or golden (True) phrase
                     '''
                     features = None
-                    filtered_data_t = unk_filter(data_t[0], True) # list of list of wordid
+                    filtered_data_t = unk_filter(data_t[0], unpad_input=True) # list of list of wordid
                     for feature_extractor in feature_extractors:
-                        feature = feature_extractor.get_feature(unk_filter(data_s[0], True), data_cand_single, filtered_data_t)
+                        feature = feature_extractor.get_feature(unk_filter(data_s[0], unpad_input=True), data_cand_single, filtered_data_t)
                         if features is None:
                             features = feature
                         else:
@@ -371,17 +378,42 @@ if __name__ == '__main__':
 
                     # 4. prepare a "batch"
                     phrases = add_padding(data_cand_single + filtered_data_t) # array of array of wordid
-                    inputs = [inputs_unk, phrases, features, ans_flag] # an input "batch" to be fed into graph
+                    inputs_unk_repeat = np.repeat(np.expand_dims(inputs_unk, axis=0), phrases.shape[0], axis=0)
+                    inputs = [inputs_unk_repeat, phrases, features, ans_flag] # an input "batch" to be fed into graph
 
                     # 5. training
                     loss_batch = []
-                    # fit the mini-mini batch
+                    # how to avoid out-of-memory?
                     if config['copynet']:
                         data_c = cc_martix(inputs_unk, phrases)
-                        loss_batch += [agent.train_(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
+                        inputs.append(data_c)
+                        loss_batch += [agent.train_(*inputs)]
                         # loss += [agent.train_guard(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
                     else:
-                        loss_batch += [agent.train_(unk_filter(mini_data_s), unk_filter(mini_data_t))]
+                        pass # TODO: prior training for vanila RNNsearch
+                    
+                    mean_ll  = np.average(np.concatenate([l[0] for l in loss_batch]))
+                    mean_ppl = np.average(np.concatenate([l[1] for l in loss_batch]))
+                    loss.append([mean_ll, mean_ppl])
+                    progbar.update(batch_id, [('loss_reg', mean_ll),
+                                            ('ppl.', mean_ppl)])                    
+
+                    # 6. Save model
+                    if batch_id % 1000 == 0 and batch_id > 1:
+                        # save the weights every K rounds
+                        pkl_name = config['path_experiment'] + '/experiments.{0}.id={1}.epoch={2}.batch={3}'.format(config['task_name'], config['timemark'], epoch, batch_id)
+                        if config['prior']:
+                            pkl_name += '.prior'
+                        agent.save(pkl_name + '.pkl')
+
+                        # save the game(training progress) in case of interrupt!
+                        optimizer_config = agent.optimizer.get_config()
+                        progpkl_name = config['path_experiment'] + '/save_training_status.id={0}.epoch={1}.batch={2}.pkl'.format(config['timemark'], epoch, batch_id)
+                        if config['prior']:
+                            progpkl_name += '.prior'
+                        serialize_to_file([name_ordering, batch_id, loss, valid_param, optimizer_config], progpkl_name + '.pkl')
+                        print(optimizer_config)
+                        # agent.save_weight_json(config['path_experiment'] + '/weight.print.id={0}.epoch={1}.batch={2}.json'.format(config['timemark'], epoch, batch_id))
 
                 else:
                     # 2. Training
