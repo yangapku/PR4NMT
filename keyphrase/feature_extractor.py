@@ -9,7 +9,7 @@ class Feature(object):
         self.n_doc = 527830 # size of trainset documents
         pass
     
-    def get_feature(self, source, cands, goldens):
+    def get_feature(self, source, cands, goldens=None):
         raise NotImplementedError
     
 class TfidfFeature(Feature):
@@ -30,11 +30,19 @@ class TfidfFeature(Feature):
         if self.stem:
             self.stemmer = PorterStemmer()
 
+    def stem_with_try(self, word):
+        try: # stem some words will raise exception
+            result = self.stemmer.stem(word)
+        except:
+            result = word
+        finally:
+            return result 
+
     def calc_df(self, wordid):
         if self.stem:
             raw_word = self.idx2word[wordid]
             try:
-                word = self.stemmer.stem(raw_word)
+                word = self.stem_with_try(raw_word)
             except:
                 word = raw_word
             finally:
@@ -42,7 +50,7 @@ class TfidfFeature(Feature):
         return self.df[wordid]
 
     def count_source(self, source):
-        source_text = [self.stemmer.stem(self.idx2word[wordid]) if self.stem 
+        source_text = [self.stem_with_try(self.idx2word[wordid]) if self.stem 
                         else self.idx2word[wordid] 
                         for wordid in source]
         source_counter = Counter(source_text)
@@ -50,12 +58,12 @@ class TfidfFeature(Feature):
 
     def calc_tf(self, wordid, source_counter):
         raw_word = self.idx2word[wordid]
-        word = self.stemmer.stem(raw_word) if self.stem else raw_word
+        word = self.stem_with_try(raw_word) if self.stem else raw_word
         return source_counter[word] if word in source_counter else 0
 
-    def get_feature(self, source, cands, goldens):
+    def get_feature(self, source, cands, goldens=None):
         n_cand = len(cands)
-        n_golden = len(goldens)
+        n_golden = len(goldens) if goldens is not None else 0
         feature = np.zeros((n_cand + n_golden, 1), dtype="float32")
         source_counter = self.count_source(source)
         for idx in range(n_cand):
@@ -64,12 +72,13 @@ class TfidfFeature(Feature):
                 if word > 1: # ignore <eol> and <unk>
                     tfidf += -1. * self.calc_tf(word, source_counter) * np.log2((1.0 + self.calc_df(word)) / (1. * self.n_doc))
             feature[idx, 0] = tfidf
-        for idx in range(n_golden):
-            tfidf = 0.
-            for word in goldens[idx]:
-                if word > 1: # ignore <eol> and <unk>
-                    tfidf += -1. * self.calc_tf(word, source_counter) * np.log2((1.0 + self.calc_df(word)) / (1. * self.n_doc))
-            feature[idx + n_cand, 0] = tfidf
+        if goldens is not None:
+            for idx in range(n_golden):
+                tfidf = 0.
+                for word in goldens[idx]:
+                    if word > 1: # ignore <eol> and <unk>
+                        tfidf += -1. * self.calc_tf(word, source_counter) * np.log2((1.0 + self.calc_df(word)) / (1. * self.n_doc))
+                feature[idx + n_cand, 0] = tfidf
         return feature
 
 class LengthFeature(Feature):
@@ -79,13 +88,16 @@ class LengthFeature(Feature):
         super(LengthFeature, self).__init__()
         self.max_length = max_length
     
-    def get_feature(self, source, cands, goldens):
+    def get_feature(self, source, cands, goldens=None):
         n_cand = len(cands)
-        n_golden = len(goldens)
+        n_golden = len(goldens) if goldens is not None else 0
         feature = np.zeros((n_cand + n_golden, self.max_length + 1), dtype="float32")
         l_cands = map(lambda x:len(x) if len(x) <= self.max_length else self.max_length, cands)
-        l_goldens = map(lambda x:len(x)  if len(x) <= self.max_length else self.max_length, goldens)
-        feature[range(n_cand + n_golden), l_cands + l_goldens] = 1.
+        if goldens is not None:
+            l_goldens = map(lambda x:len(x)  if len(x) <= self.max_length else self.max_length, goldens)
+            feature[range(n_cand + n_golden), l_cands + l_goldens] = 1.
+        else:
+            feature[range(n_cand), l_cands] = 1.
         return feature
 
 class KeyphrasenessFeature(Feature):
@@ -116,12 +128,13 @@ class KeyphrasenessFeature(Feature):
             phrase_str = " ".join([self.idx2word[wordid] for wordid in phrase])
         return 1. * self.phrase_counter[phrase_str] if phrase_str in self.phrase_counter else 0.
 
-    def get_feature(self, source, cands, goldens):
+    def get_feature(self, source, cands, goldens=None):
         n_cand = len(cands)
-        n_golden = len(goldens)
+        n_golden = len(goldens) if goldens is not None else 0
         feature = np.zeros((n_cand + n_golden, 1), dtype="float32")
         feature[:n_cand] = np.asarray(map(lambda x:self.cal_kpn(x), cands)).reshape((n_cand, 1))
-        feature[n_cand:] = np.asarray(map(lambda x:self.cal_kpn(x), goldens)).reshape((n_golden, 1))
+        if goldens is not None:
+            feature[n_cand:] = np.asarray(map(lambda x:self.cal_kpn(x), goldens)).reshape((n_golden, 1))
         return feature
 
 class StopwordFeature(Feature):
@@ -137,13 +150,14 @@ class StopwordFeature(Feature):
     def has_stopword(self, phrase):
         return np.any(map(lambda x: x in self.stopword_idxset, phrase))
 
-    def get_feature(self, source, cands, goldens):
+    def get_feature(self, source, cands, goldens=None):
         # feature indicating whether phrase contains stopwords
         n_cand = len(cands)
-        n_golden = len(goldens)
+        n_golden = len(goldens) if goldens is not None else 0
         feature = np.zeros((n_cand + n_golden, 1), dtype="float32")
         feature[:n_cand] = np.asarray(map(lambda x:self.has_stopword(x), cands), dtype="float32").reshape((n_cand, 1))
-        feature[n_cand:] = np.asarray(map(lambda x:self.has_stopword(x), goldens), dtype="float32").reshape((n_golden, 1))
+        if goldens is not None:
+            feature[n_cand:] = np.asarray(map(lambda x:self.has_stopword(x), goldens), dtype="float32").reshape((n_golden, 1))
         return feature
 
 class PositionFeature(Feature):
@@ -164,11 +178,12 @@ class PositionFeature(Feature):
             feat[offset_level] = 1.
         return feat
 
-    def get_feature(self, source, cands, goldens):
+    def get_feature(self, source, cands, goldens=None):
         # (n_level + 1) features indicating whether and where the phrase appears in source text
         n_cand = len(cands)
-        n_golden = len(goldens)
+        n_golden = len(goldens) if goldens is not None else 0
         feature = np.zeros((n_cand + n_golden, self.n_level + 1), dtype="float32")
         feature[:n_cand] = np.asarray(map(lambda x:self.cal_pos(x, source), cands), dtype="float32")
-        feature[n_cand:] = np.asarray(map(lambda x:self.cal_pos(x, source), goldens), dtype="float32")
+        if goldens is not None:
+            feature[n_cand:] = np.asarray(map(lambda x:self.cal_pos(x, source), goldens), dtype="float32")
         return feature

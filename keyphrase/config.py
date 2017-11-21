@@ -13,7 +13,7 @@ def setup_keyphrase_all():
     config['seed']            = 154316847
     # for naming the outputs and logs
     config['model_name']      = 'CopyPrior' # 'TfIdf', 'TextRank', 'SingleRank', 'ExpandRank', 'Maui', 'Kea', 'RNN', 'CopyRNN'
-    config['task_name']       = 'prior11.15'
+    config['task_name']       = 'prior11.20'
     config['timemark']        = time.strftime('%Y%m%d-%H%M%S', time.localtime(time.time()))
 
     config['path']            = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)) #path.realpath(path.curdir)
@@ -67,7 +67,6 @@ def setup_keyphrase_all():
     config['testing_id']      = config['path'] + '/dataset/keyphrase/'+config['data_process_name']+'testing_id_'+str(config['validation_size'])+'.pkl'
     config['dataset']         = config['path'] + '/dataset/keyphrase/'+config['data_process_name']+'all_600k_dataset.pkl'
     config['voc']             = config['path'] + '/dataset/keyphrase/'+config['data_process_name']+'all_600k_voc.pkl' # for manual check
-
     # Optimization
     config['use_noise']       = False
     config['optimizer']       = 'adam'
@@ -77,7 +76,7 @@ def setup_keyphrase_all():
     config['get_instance']    = True
 
     # size
-    config['batch_size']      = 50
+    config['batch_size']      = 1
     config['mini_mini_batch_length']      = 500000 # max length (#words) of each mini-mini batch, up to the GPU memory you have
     config['mode']            = 'RNN'
     config['binary']          = False
@@ -88,7 +87,7 @@ def setup_keyphrase_all():
         os.mkdir(config['path_log'])
 
     # path to pre-trained model
-    config['trained_model']   = '' #config['path_experiment'] + '/experiments.keyphrase-all.one2one.copy.id=20170106-025508.epoch=4.batch=1000.pkl'
+    config['trained_model']   = '/home/yangan/projects/keywords/seq2seq-keyphrase/Experiment/rerun10.17/experiments.rerun10.17.id=20171017-184106.epoch=5.batch=10000.pkl' #config['path_experiment'] + '/experiments.keyphrase-all.one2one.copy.id=20170106-025508.epoch=4.batch=1000.pkl'
     # config['trained_model']   = config['path_experiment'] + '/experiments.keyphrase-all.one2one.copy.id=20170106-025508.epoch=4.batch=1000.pkl'
 
     config['weight_json']= config['path_experiment'] + '/model_weight.json'
@@ -151,6 +150,21 @@ def setup_keyphrase_all():
     config['location_embed']  = True
     config['coverage']        = True
     config['copygate']        = False
+
+    # Decoder: Prior
+    config['prior'] = True
+    config['features'] = ['TfidfFeature', 'LengthFeature', 'KeyphrasenessFeature', 'StopwordFeature', 'PositionFeature'] # TODO: more features to be added
+    config['n_level'] = 5 # used in Position feature
+    config['feature_dim'] = 1 + (config['max_len'] + 1) + 1 + 1 + (config['n_level'] + 1)
+    config['candidate_size'] = 30
+    config['lambda_1'] = 8e-5
+    config['lambda_2'] = 2.5e-4
+    config['alpha'] = 0.2
+    config['filter_unk_when_calcfeat'] = True # whether do unk_filter on source, cand and golden when calculating features
+    config['sample_method'] = 'beam_first' # options:   beam_first: choose first ones in beam search results
+                                           #            beam_randchoice: randomly choose from beam search results
+                                           #            stochastic: use stochastic decoding instead of beam search
+    config['rerank'] = False # whether or not to do rerank when predicting
 
     # Decoder: Model
     config['shared_embed']    = False

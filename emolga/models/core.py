@@ -55,8 +55,6 @@ class Model(object):
 
         if self.config['prior'] and len(params) > len(weights): # prior training after raw training
             params = params[:len(weights)]
-        if not self.config['prior'] and len(params) < len(weights): # pridicting after prior training
-            weights = weights[:len(params)] 
 
         for p, w in zip(params, weights):
             # print(p.name)

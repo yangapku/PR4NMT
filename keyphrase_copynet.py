@@ -142,9 +142,9 @@ def unk_filter(data, unpad_input=False):
         filtered_data = []
         for item in data:
             if isinstance(item, Iterable): # list of list of wordid
-                filtered_data.append(map(lambda x:x if x <= config['voc_size'] else 1, item))
+                filtered_data.append(map(lambda x:x if x < config['voc_size'] else 1, item))
             else: # list of wordid
-                filtered_data.append(item if item <= config['voc_size'] else 1)
+                filtered_data.append(item if item < config['voc_size'] else 1)
         return filtered_data
 
 
@@ -360,8 +360,13 @@ if __name__ == '__main__':
                 if config["prior"]:
                     # 2. Do sampling
                     inputs_unk = np.asarray(unk_filter(np.asarray(data_s_padding[0], dtype='int32')), dtype='int32')
-                    data_cand_single, score = agent.generate_multiple(inputs_unk[None, :], return_encoding=False, for_priorsample=True)
+                    if config['sample_method'] == 'beam_first':
+                        data_cand_single, score = agent.generate_multiple(inputs_unk[None, :], return_encoding=False, for_priorsample=True)
+                        data_cand_single = data_cand_single[:config['candidate_size']] if config['candidate_size'] <= len(data_cand_single) else data_cand_single
+                    elif config['sample_method'] == 'stochastic':
+                        pass
                     data_cand_single = [strip(cand) for cand in data_cand_single] # strip the zero at the end
+
                     # 3. Calculate features and generate data for training graph
                     '''
                     input:  data_s_single --the id of input source text
@@ -371,9 +376,13 @@ if __name__ == '__main__':
                             ans_flag --flag array indicating correspoding target is a cand (False) or golden (True) phrase
                     '''
                     features = None
+                    filtered_data_cand = unk_filter(data_cand_single, unpad_input=True)
                     filtered_data_t = unk_filter(data_t[0], unpad_input=True) # list of list of wordid
                     for feature_extractor in feature_extractors:
-                        feature = feature_extractor.get_feature(unk_filter(data_s[0], unpad_input=True), data_cand_single, filtered_data_t)
+                        if config['filter_unk_when_calcfeat']:
+                            feature = feature_extractor.get_feature(unk_filter(data_s[0], unpad_input=True), filtered_data_cand, filtered_data_t)
+                        else:
+                            feature = feature_extractor.get_feature(data_s[0], data_cand_single, data_t[0])
                         if features is None:
                             features = feature
                         else:
@@ -382,7 +391,7 @@ if __name__ == '__main__':
                     ans_flag[len(data_cand_single): ] = True
 
                     # 4. prepare a "batch"
-                    phrases = add_padding(data_cand_single + filtered_data_t) # array of array of wordid
+                    phrases = add_padding(filtered_data_cand + filtered_data_t) # array of array of wordid
                     inputs_unk_repeat = np.repeat(np.expand_dims(inputs_unk, axis=0), phrases.shape[0], axis=0)
                     inputs = [inputs_unk_repeat, phrases, features, ans_flag] # an input "batch" to be fed into graph
 
@@ -396,7 +405,6 @@ if __name__ == '__main__':
                         # loss += [agent.train_guard(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
                     else:
                         pass # TODO: prior training for vanila RNNsearch
-                    print(loss_batch)
                     loss_batch[0][0] = loss_batch[0][0][len(data_cand_single):]
                     loss_batch[0][1] = loss_batch[0][1][len(data_cand_single):]
                     mean_ll  = np.average(np.concatenate([l[0] for l in loss_batch]))
@@ -670,6 +678,38 @@ if __name__ == '__main__':
                     output_encodings.append(output_encoding)
                 else:
                     prediction, score = agent.generate_multiple(inputs_unk[None, :], return_encoding=False)
+
+                if config['prior'] and config['rerank']:
+                    # strip <eol> of beam search candidates
+                    prediction_strip = [strip(cand) for cand in prediction]
+
+                    # filter unk in source and candidates if needed
+                    if config['filter_unk_when_calcfeat']:
+                        prediction_strip_filt = unk_filter(prediction_strip, unpad_input=True)
+                        test_s_filt = unk_filter(test_s, unpad_input=True)   
+                    
+                    # extract features
+                    features = None
+                    for feature_extractor in feature_extractors:
+                        if config['filter_unk_when_calcfeat']:
+                            feature = feature_extractor.get_feature(test_s_filt, prediction_strip_filt)
+                        else:
+                            feature = feature_extractor.get_feature(test_s, prediction_strip)
+                        if features is None:
+                            features = feature
+                        else:
+                            features = np.concatenate([features, feature], axis=1)
+                    
+                    # calculate loglinear scores
+                    weights = agent.params[-2].get_value() # shape: [n_features, 1]
+                    bias = agent.params[-1].get_value() # shape: [1, ]
+                    ll_score = np.matmul(features, weights) + bias # shape: [n_samples, 1]
+
+                    # rerank
+                    comb_score = [score[candidx] - float(ll_score[candidx]) for candidx in range(len(score))]
+                    result = zip(prediction, comb_score)
+                    result = sorted(result, key=lambda entry: entry[1])
+                    prediction, score = zip(*result)
 
                 predictions.append(prediction)
                 scores.append(score)
