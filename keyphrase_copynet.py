@@ -354,10 +354,10 @@ if __name__ == '__main__':
                 data_s = train_data_source[data_ids]
                 data_t = train_data_target[data_ids]
 
-                # convert one data (with multiple targets) into multiple ones
-                data_s_padding, data_t_padding = split_into_multiple_and_padding(data_s, data_t)
-
                 if config["prior"]:
+                    # convert one data (with multiple targets) into multiple ones
+                    data_s_padding, _ = split_into_multiple_and_padding(data_s, data_t)                    
+                    
                     # 2. Do sampling
                     inputs_unk = np.asarray(unk_filter(np.asarray(data_s_padding[0], dtype='int32')), dtype='int32')
                     if config['sample_method'] == 'beam_first':
@@ -366,7 +366,7 @@ if __name__ == '__main__':
                     elif config['sample_method'] == 'stochastic':
                         pass
                     data_cand_single = [strip(cand) for cand in data_cand_single] # strip the zero at the end
-
+ 
                     # 3. Calculate features and generate data for training graph
                     '''
                     input:  data_s_single --the id of input source text
@@ -401,10 +401,8 @@ if __name__ == '__main__':
                     if config['copynet']:
                         data_c = cc_martix(inputs_unk, phrases)
                         inputs.append(data_c)
-                        loss_batch += [agent.train_(*inputs)]
-                        # loss += [agent.train_guard(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
-                    else:
-                        pass # TODO: prior training for vanila RNNsearch
+                    loss_batch += [agent.train_(*inputs)]
+
                     loss_batch[0][0] = loss_batch[0][0][len(data_cand_single):]
                     loss_batch[0][1] = loss_batch[0][1][len(data_cand_single):]
                     mean_ll  = np.average(np.concatenate([l[0] for l in loss_batch]))
