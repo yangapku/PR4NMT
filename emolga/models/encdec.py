@@ -2010,7 +2010,7 @@ class NRM(Model):
                                       name='validate_fun',
                                       allow_input_downcast=True)
 
-        self.represent_ = theano.function(train_inputs,
+        self.represent_ = theano.function([inputs, target],
                                       [prob, stat],
                                       name='represent_fun',
                                       allow_input_downcast=True
@@ -2068,7 +2068,7 @@ class NRM(Model):
 
         return sample, np.exp(score)
 
-    def generate_multiple(self, inputs, mode='display', return_all=True, all_ngram=True, generate_ngram=True):
+    def generate_multiple(self, inputs, mode='display', return_all=True, all_ngram=True, generate_ngram=True, for_priorsample=False):
         '''
         Generate output sequence
         '''

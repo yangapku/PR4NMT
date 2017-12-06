@@ -12,8 +12,8 @@ def setup_keyphrase_all():
     '''
     config['seed']            = 154316847
     # for naming the outputs and logs
-    config['model_name']      = 'CopyPrior' # 'TfIdf', 'TextRank', 'SingleRank', 'ExpandRank', 'Maui', 'Kea', 'RNN', 'CopyRNN'
-    config['task_name']       = 'prior11.20'
+    config['model_name']      = 'RNN' # 'TfIdf', 'TextRank', 'SingleRank', 'ExpandRank', 'Maui', 'Kea', 'RNN', 'CopyRNN'
+    config['task_name']       = 'vanila12.2'
     config['timemark']        = time.strftime('%Y%m%d-%H%M%S', time.localtime(time.time()))
 
     config['path']            = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)) #path.realpath(path.curdir)
@@ -76,7 +76,7 @@ def setup_keyphrase_all():
     config['get_instance']    = True
 
     # size
-    config['batch_size']      = 1
+    config['batch_size']      = 50
     config['mini_mini_batch_length']      = 500000 # max length (#words) of each mini-mini batch, up to the GPU memory you have
     config['mode']            = 'RNN'
     config['binary']          = False
@@ -87,7 +87,8 @@ def setup_keyphrase_all():
         os.mkdir(config['path_log'])
 
     # path to pre-trained model
-    config['trained_model']   = '/home/yangan/projects/keywords/seq2seq-keyphrase/Experiment/rerun10.17/experiments.rerun10.17.id=20171017-184106.epoch=5.batch=10000.pkl' #config['path_experiment'] + '/experiments.keyphrase-all.one2one.copy.id=20170106-025508.epoch=4.batch=1000.pkl'
+    config['trained_model']   = config['path_experiment'] + '/experiments.vanila12.2.id=20171202-143524.epoch=4.batch=4000.pkl' #config['path_experiment'] + '/experiments.keyphrase-all.one2one.copy.id=20170106-025508.epoch=4.batch=1000.pkl'
+    config['trained_batch']   = 3 # if there is pre-trained model, resume training from trained_batch
     # config['trained_model']   = config['path_experiment'] + '/experiments.keyphrase-all.one2one.copy.id=20170106-025508.epoch=4.batch=1000.pkl'
 
     config['weight_json']= config['path_experiment'] + '/model_weight.json'
@@ -144,7 +145,7 @@ def setup_keyphrase_all():
                                 else 2 * config['enc_hidden_dim']
 
     # Decoder: CopyNet
-    config['copynet']         = True
+    config['copynet']         = False
     # config['copynet']         = False
     config['identity']        = False
     config['location_embed']  = True
@@ -152,7 +153,7 @@ def setup_keyphrase_all():
     config['copygate']        = False
 
     # Decoder: Prior
-    config['prior'] = True
+    config['prior'] = False
     config['features'] = ['TfidfFeature', 'LengthFeature', 'KeyphrasenessFeature', 'StopwordFeature', 'PositionFeature'] # TODO: more features to be added
     config['n_level'] = 5 # used in Position feature
     config['feature_dim'] = 1 + (config['max_len'] + 1) + 1 + 1 + (config['n_level'] + 1)

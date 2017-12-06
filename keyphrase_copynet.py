@@ -295,7 +295,7 @@ if __name__ == '__main__':
             agent.load(config['trained_model'])
             # agent.save_weight_json(config['weight_json'])
 
-    epoch   = 0
+    epoch   = config['trained_batch']
     epochs = 10
     valid_param = {}
     valid_param['early_stop'] = False
@@ -346,6 +346,7 @@ if __name__ == '__main__':
                 agent.optimizer.clipnorm = optimizer_config['clipnorm']
                 # batch_start = 40001
 
+            iter_id = batch_start # batch_start = 1
             for batch_id in range(batch_start, num_batches):
                 # 1. Prepare data
                 data_ids = name_ordering[batch_id * config['batch_size']:min((batch_id + 1) * config['batch_size'], len(train_data_plain))]
@@ -355,18 +356,23 @@ if __name__ == '__main__':
                 data_t = train_data_target[data_ids]
 
                 if config["prior"]:
+                    # omit samples having too long source or too many targets
+                    if len(data_s[0]) > 500 or len(data_t[0]) > 40:
+                        logger.info("Skipped a sample with id %d." % data_ids[0])
+                        continue
+
                     # convert one data (with multiple targets) into multiple ones
                     data_s_padding, _ = split_into_multiple_and_padding(data_s, data_t)                    
                     
                     # 2. Do sampling
                     inputs_unk = np.asarray(unk_filter(np.asarray(data_s_padding[0], dtype='int32')), dtype='int32')
                     if config['sample_method'] == 'beam_first':
-                        data_cand_single, score = agent.generate_multiple(inputs_unk[None, :], return_encoding=False, for_priorsample=True)
+                        data_cand_single, score = agent.generate_multiple(inputs_unk[None, :], for_priorsample=True)
                         data_cand_single = data_cand_single[:config['candidate_size']] if config['candidate_size'] <= len(data_cand_single) else data_cand_single
                     elif config['sample_method'] == 'stochastic':
                         pass
                     data_cand_single = [strip(cand) for cand in data_cand_single] # strip the zero at the end
- 
+                    
                     # 3. Calculate features and generate data for training graph
                     '''
                     input:  data_s_single --the id of input source text
@@ -408,25 +414,27 @@ if __name__ == '__main__':
                     mean_ll  = np.average(np.concatenate([l[0] for l in loss_batch]))
                     mean_ppl = np.average(np.concatenate([l[1] for l in loss_batch]))
                     loss.append([mean_ll, mean_ppl])
-                    progbar.update(batch_id, [('loss_reg', mean_ll),
+                    progbar.update(iter_id, [('loss_reg', mean_ll),
                                             ('ppl.', mean_ppl)])                    
 
                     # 6. Save model
-                    if batch_id % 1000 == 0 and batch_id > 1:
+                    if iter_id % 1000 == 0 and iter_id > 1:
                         # save the weights every K rounds
-                        pkl_name = config['path_experiment'] + '/experiments.{0}.id={1}.epoch={2}.batch={3}'.format(config['task_name'], config['timemark'], epoch, batch_id)
+                        pkl_name = config['path_experiment'] + '/experiments.{0}.id={1}.epoch={2}.batch={3}'.format(config['task_name'], config['timemark'], epoch, iter_id)
                         if config['prior']:
                             pkl_name += '.prior'
                         agent.save(pkl_name + '.pkl')
 
                         # save the game(training progress) in case of interrupt!
                         optimizer_config = agent.optimizer.get_config()
-                        progpkl_name = config['path_experiment'] + '/save_training_status.id={0}.epoch={1}.batch={2}.pkl'.format(config['timemark'], epoch, batch_id)
+                        progpkl_name = config['path_experiment'] + '/save_training_status.id={0}.epoch={1}.batch={2}.pkl'.format(config['timemark'], epoch, iter_id)
                         if config['prior']:
                             progpkl_name += '.prior'
                         serialize_to_file([name_ordering, batch_id, loss, valid_param, optimizer_config], progpkl_name + '.pkl')
                         print(optimizer_config)
                         # agent.save_weight_json(config['path_experiment'] + '/weight.print.id={0}.epoch={1}.batch={2}.json'.format(config['timemark'], epoch, batch_id))
+                    
+                    iter_id += 1
 
                 else:
                     # 2. Training
@@ -477,15 +485,15 @@ if __name__ == '__main__':
                     mean_ll  = np.average(np.concatenate([l[0] for l in loss_batch]))
                     mean_ppl = np.average(np.concatenate([l[1] for l in loss_batch]))
                     loss.append([mean_ll, mean_ppl])
-                    progbar.update(batch_id, [('loss_reg', mean_ll),
+                    progbar.update(iter_id, [('loss_reg', mean_ll),
                                             ('ppl.', mean_ppl)])
 
                     # 5. Quick testing
-                    if config['do_quick_testing'] and batch_id % 200 == 0 and batch_id > 1:
+                    if config['do_quick_testing'] and iter_id % 200 == 0 and iter_id > 1:
                         print_case = '-' * 100 +'\n'
 
-                        logger.info('Echo={} Evaluation Sampling.'.format(batch_id))
-                        print_case += 'Echo={} Evaluation Sampling.\n'.format(batch_id)
+                        logger.info('Echo={} Evaluation Sampling.'.format(iter_id))
+                        print_case += 'Echo={} Evaluation Sampling.\n'.format(iter_id)
 
                         logger.info('generating [training set] samples')
                         print_case += 'generating [training set] samples\n'
@@ -528,8 +536,8 @@ if __name__ == '__main__':
                             print_case_file.write(print_case)
 
                     # 6. Test on validation data for a few batches, and do early-stopping if needed
-                    if do_validate and batch_id % 1000 == 0 and not (batch_id==0 and epoch==1):
-                        logger.info('Validate @ epoch=%d, batch=%d' % (epoch, batch_id))
+                    if do_validate and iter_id % 1000 == 0 and not (iter_id==0 and epoch==1):
+                        logger.info('Validate @ epoch=%d, batch=%d' % (epoch, iter_id))
                         # 1. Prepare data
                         data_s = np.array(validation_set['source'])[:config['validation_size']]
                         data_t = np.array(validation_set['target'])[:config['validation_size']]
@@ -593,13 +601,13 @@ if __name__ == '__main__':
                             logger.info('Not improved for %s tests.' % valid_param['valids_not_improved'])
 
                     # 7. Save model
-                    if batch_id % 1000 == 0 and batch_id > 1:
+                    if iter_id % 1000 == 0 and iter_id > 1:
                         # save the weights every K rounds
-                        agent.save(config['path_experiment'] + '/experiments.{0}.id={1}.epoch={2}.batch={3}.pkl'.format(config['task_name'], config['timemark'], epoch, batch_id))
+                        agent.save(config['path_experiment'] + '/experiments.{0}.id={1}.epoch={2}.batch={3}.pkl'.format(config['task_name'], config['timemark'], epoch, iter_id))
 
                         # save the game(training progress) in case of interrupt!
                         optimizer_config = agent.optimizer.get_config()
-                        serialize_to_file([name_ordering, batch_id, loss, valid_param, optimizer_config], config['path_experiment'] + '/save_training_status.id={0}.epoch={1}.batch={2}.pkl'.format(config['timemark'], epoch, batch_id))
+                        serialize_to_file([name_ordering, batch_id, loss, valid_param, optimizer_config], config['path_experiment'] + '/save_training_status.id={0}.epoch={1}.batch={2}.pkl'.format(config['timemark'], epoch, iter_id))
                         print(optimizer_config)
                         # agent.save_weight_json(config['path_experiment'] + '/weight.print.id={0}.epoch={1}.batch={2}.json'.format(config['timemark'], epoch, batch_id))
 
@@ -609,6 +617,7 @@ if __name__ == '__main__':
                         valid_param['early_stop'] = True
                         break
 
+                    iter_id += 1
     '''
     test accuracy and f-score at the end of each epoch
     '''

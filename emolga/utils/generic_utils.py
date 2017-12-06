@@ -135,6 +135,9 @@ class Progbar(object):
                 else:
                     info += ' - %s: %.4f' % (k, self.sum_values[k][0] / max(1, self.sum_values[k][1]))
 
+            # modification: not only display accumulated avg loss and ppl, but also show loss and ppl in this iter
+            info += ' (this iter: %.4f / %.4f)' % (self.sum_values['loss_reg'][0], self.sum_values['ppl.'][0])
+
             self.total_width += len(info)
             if prev_total_width > self.total_width:
                 info += ((prev_total_width-self.total_width) * " ")
