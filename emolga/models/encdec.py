@@ -1869,6 +1869,7 @@ class NRM(Model):
         if mode == 'train' or mode == 'all':
             if self.config["prior"]:
                 self.compile_train_prior()
+                self.compile_valid_prior()
             else:
                 self.compile_train()
 
@@ -2017,7 +2018,38 @@ class NRM(Model):
                                       )
 
 
+    def compile_valid_prior(self):
+    
+        # questions (theano variables)
+        inputs  = T.imatrix()  # padded input word sequence (for training)
+        target  = T.imatrix()  # padded target word sequence (for training)
+
+        # encoding & decoding
+        if not self.attend:
+            code               = self.encoder.build_encoder(inputs, None)
+            logPxz, logPPL     = self.decoder.build_decoder(target, code)
+        else:
+            # encode text by encoder, return encoded vector at each time (code) and mask showing non-zero elements
+            code, _, c_mask, _ = self.encoder.build_encoder(inputs, None, return_sequence=True, return_embed=True)
+            # feed target(index vector of target), code(encoding of source text), c_mask (mask of source text) into decoder, get objective value
+            #    logPxz,logPPL are tensors in [nb_samples,1], cross-entropy and Perplexity of each sample
+            logPxz, logPPL     = self.decoder.build_decoder(target, code, c_mask)
+            prob, stat         = self.decoder.build_representer(target, code, c_mask)
+
+
+        # responding loss
+        loss_rec = -logPxz # get the mean of cross-entropy of this batch
+        loss_ppl = T.exp(-logPPL)
+
+        train_inputs = [inputs, target]
+
+        self.validate_ = theano.function(train_inputs,
+                                      [loss_rec, loss_ppl],
+                                      name='validate_fun',
+                                      allow_input_downcast=True)
+
         logger.info("training functions compile done.")
+
 
     def compile_sample(self):
         if not self.attend:

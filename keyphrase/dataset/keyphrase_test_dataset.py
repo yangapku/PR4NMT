@@ -631,6 +631,46 @@ class KP20k(DataLoader):
         else:
             return self.doclist
 
+class KP20kval(DataLoader):
+    def __init__(self, **kwargs):
+        super(KP20kval, self).__init__(**kwargs)
+        self.datadir = self.basedir + '/dataset/keyphrase/baseline-data/kp20kval/'
+        self.textdir = self.datadir + '/plain_text/'
+        self.keyphrasedir = self.datadir + '/keyphrase/'
+
+        self.postag_datadir = self.basedir + '/dataset/keyphrase/baseline-data/kp20kval/'
+        self.text_postag_dir = self.postag_datadir + 'text/'
+        self.keyphrase_postag_dir = self.postag_datadir + 'keyphrase/'
+
+    def get_docs(self, return_dict=True):
+        '''
+        :return: a list of dict instead of the Document object
+        '''
+        for fname in os.listdir(self.textdir):
+            d = Document()
+            d.name = fname
+            with open(self.textdir + fname, 'r') as textfile:
+                lines = textfile.readlines()
+                d.title = lines[0].strip()
+                d.text = ' '.join(lines[1:])
+            with open(self.keyphrasedir + fname, 'r') as phrasefile:
+                d.phrases = [l.strip() for l in phrasefile.readlines()]
+            self.doclist.append(d)
+
+        doclist = []
+        for d in self.doclist:
+            newd = {}
+            newd['name'] = d.name
+            newd['abstract'] = re.sub('[\r\n]', ' ', d.text).strip()
+            newd['title'] = re.sub('[\r\n]', ' ', d.title).strip()
+            newd['keyword'] = ';'.join(d.phrases)
+            doclist.append(newd)
+
+        if return_dict:
+            return doclist
+        else:
+            return self.doclist
+
 class IRBooks(DataLoader):
     def __init__(self, **kwargs):
         super(IRBooks, self).__init__(**kwargs)
@@ -722,6 +762,7 @@ kdd = KDD
 www = WWW
 umd = UMD
 kp20k = KP20k
+kp20kval = KP20kval
 duc = DUC
 irbooks = IRBooks
 quora = Quora # for Runhua's data

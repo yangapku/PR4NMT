@@ -12,11 +12,11 @@ def setup_keyphrase_all():
     '''
     config['seed']            = 154316847
     # for naming the outputs and logs
-    config['model_name']      = 'RNN' # 'TfIdf', 'TextRank', 'SingleRank', 'ExpandRank', 'Maui', 'Kea', 'RNN', 'CopyRNN'
-    config['task_name']       = 'vanila12.2'
+    config['model_name']      = 'CopyPrior' # 'TfIdf', 'TextRank', 'SingleRank', 'ExpandRank', 'Maui', 'Kea', 'RNN', 'CopyRNN'
+    config['task_name']       = 'prior11.20'
     config['timemark']        = time.strftime('%Y%m%d-%H%M%S', time.localtime(time.time()))
 
-    config['path']            = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)) #path.realpath(path.curdir)
+    config['path']            = '/home/yangan/projects/keywords/seq2seq-keyphrase/' #path.realpath(path.curdir)
     config['path_experiment'] = config['path'] + '/Experiment/'+config['task_name']
     config['path_h5']         = config['path_experiment']
     config['path_log']        = config['path_experiment']
@@ -27,14 +27,14 @@ def setup_keyphrase_all():
     Experiment process
     '''
     # do training?
-    config['do_train']        = True
+    config['do_train']        = False
     # config['do_train']        = False
 
     # do quick-testing (while training)?
     config['do_quick_testing']     = False
     # config['do_quick_testing']     = False
 
-    # do validation?
+    # do validation for early stopping?
     # config['do_validate']     = True
     config['do_validate']     = False
 
@@ -45,6 +45,12 @@ def setup_keyphrase_all():
     # do testing?
     # config['do_evaluate']     = True
     config['do_evaluate']     = False
+
+    # do valiation for picking model?
+    # this config is set true when training is finished and you want to choose good checkpoint
+    # when setting true, do_train should be false
+    # when training, this config should be false
+    config['do_validateforpick'] = True
 
     '''
     Training settings
@@ -62,7 +68,7 @@ def setup_keyphrase_all():
 
     config['data_process_name'] = 'punctuation-20000validation-20000testing/'
 
-    config['validation_size'] = 20000
+    config['validation_size'] = 1000
     config['validation_id']   = config['path'] + '/dataset/keyphrase/'+config['data_process_name']+'validation_id_'+str(config['validation_size'])+'.pkl'
     config['testing_id']      = config['path'] + '/dataset/keyphrase/'+config['data_process_name']+'testing_id_'+str(config['validation_size'])+'.pkl'
     config['dataset']         = config['path'] + '/dataset/keyphrase/'+config['data_process_name']+'all_600k_dataset.pkl'
@@ -77,7 +83,7 @@ def setup_keyphrase_all():
 
     # size
     config['batch_size']      = 50
-    config['mini_mini_batch_length']      = 500000 # max length (#words) of each mini-mini batch, up to the GPU memory you have
+    config['mini_mini_batch_length']      = 250000 # max length (#words) of each mini-mini batch, up to the GPU memory you have
     config['mode']            = 'RNN'
     config['binary']          = False
     config['voc_size']        = 50000
@@ -87,8 +93,8 @@ def setup_keyphrase_all():
         os.mkdir(config['path_log'])
 
     # path to pre-trained model
-    config['trained_model']   = config['path_experiment'] + '/experiments.vanila12.2.id=20171202-143524.epoch=4.batch=4000.pkl' #config['path_experiment'] + '/experiments.keyphrase-all.one2one.copy.id=20170106-025508.epoch=4.batch=1000.pkl'
-    config['trained_batch']   = 3 # if there is pre-trained model, resume training from trained_batch
+    config['trained_model']   = config['path_experiment'] + '/experiments.prior11.20.id=20171120-190708.epoch=1.batch=36000.prior.pkl' #config['path_experiment'] + '/experiments.keyphrase-all.one2one.copy.id=20170106-025508.epoch=4.batch=1000.pkl'
+    config['trained_batch']   = 0 # if there is pre-trained model, resume training from trained_batch
     # config['trained_model']   = config['path_experiment'] + '/experiments.keyphrase-all.one2one.copy.id=20170106-025508.epoch=4.batch=1000.pkl'
 
     config['weight_json']= config['path_experiment'] + '/model_weight.json'
@@ -145,7 +151,7 @@ def setup_keyphrase_all():
                                 else 2 * config['enc_hidden_dim']
 
     # Decoder: CopyNet
-    config['copynet']         = False
+    config['copynet']         = True
     # config['copynet']         = False
     config['identity']        = False
     config['location_embed']  = True
@@ -153,10 +159,16 @@ def setup_keyphrase_all():
     config['copygate']        = False
 
     # Decoder: Prior
-    config['prior'] = False
-    config['features'] = ['TfidfFeature', 'LengthFeature', 'KeyphrasenessFeature', 'StopwordFeature', 'PositionFeature'] # TODO: more features to be added
+    config['prior'] = True
+    config['features'] = ['TfidfFeature', 
+                          'LengthFeature', 
+                          'KeyphrasenessFeature', 
+                          'StopwordFeature', 
+                          'PositionFeature',
+                          'PostagSeqFeature',
+                        ] # TODO: more features to be added
     config['n_level'] = 5 # used in Position feature
-    config['feature_dim'] = 1 + (config['max_len'] + 1) + 1 + 1 + (config['n_level'] + 1)
+    config['feature_dim'] = 1 + (config['max_len'] + 1) + 1 + 1 + (config['n_level'] + 1) + 2677
     config['candidate_size'] = 30
     config['lambda_1'] = 8e-5
     config['lambda_2'] = 2.5e-4

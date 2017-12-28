@@ -1831,7 +1831,9 @@ class NRM(Model):
 
         if mode == 'train' or mode == 'all':
             if self.config["prior"]:
+                # in prior training, we separately construct computation graphs for train and valid
                 self.compile_train_prior()
+                self.compile_valid_prior()
             else:
                 self.compile_train()
 
@@ -1966,7 +1968,7 @@ class NRM(Model):
                                       name='validate_fun',
                                       allow_input_downcast=True)
 
-        logger.info("training functions compile done.")
+        # logger.info("training functions compile done.") 
 
         # # add monitoring:
         # self.monitor['context'] = context
@@ -1974,6 +1976,46 @@ class NRM(Model):
         #
         # # compiling monitoring
         # self.compile_monitoring(train_inputs)    
+
+    # almost the same with vanila training
+    def compile_valid_prior(self):
+    
+        # questions (theano variables)
+        inputs    = T.imatrix()  # padded input word sequence (for training)
+        target    = T.imatrix()  # padded target word sequence (for training)
+        cc_matrix = T.tensor3()
+
+        # encoding & decoding
+
+        code, _, c_mask, _ = self.encoder.build_encoder(inputs, None, return_sequence=True, return_embed=True)
+        # code: (nb_samples, max_len, contxt_dim)
+        if 'explicit_loc' in self.config:
+            if self.config['explicit_loc']:
+                print('use explicit location!!')
+                max_len = code.shape[1]
+                expLoc  = T.eye(max_len, self.config['encode_max_len'], dtype='float32')[None, :, :]
+                expLoc  = T.repeat(expLoc, code.shape[0], axis=0)
+                code    = T.concatenate([code, expLoc], axis=2)
+
+        # self.decoder.build_decoder(target, cc_matrix, code, c_mask)
+        #       feed target(index vector of target), cc_matrix(copy matrix), code(encoding of source text), c_mask (mask of source text) into decoder, get objective value
+        #       logPxz,logPPL are tensors in [nb_samples,1], cross-entropy and Perplexity of each sample
+        # normal seq2seq
+        logPxz, logPPL     = self.decoder.build_decoder(target, cc_matrix, code, c_mask)
+
+        # responding loss
+        loss_rec = -logPxz
+        loss_ppl = T.exp(-logPPL)
+
+        # input contains inputs, target and cc_matrix
+        train_inputs = [inputs, target, cc_matrix]
+
+        self.validate_ = theano.function(train_inputs,
+                                      [loss_rec, loss_ppl],
+                                      name='validate_fun',
+                                      allow_input_downcast=True)
+
+        logger.info("training functions compile done.")
 
     def compile_sample(self):
         if not self.attend:

@@ -2,6 +2,8 @@ from __future__ import print_function, division
 import pickle
 import numpy as np
 from nltk.stem.porter import *
+from nltk.stem.wordnet import *
+from nltk import pos_tag
 from collections import Counter
 
 class Feature(object):
@@ -162,6 +164,7 @@ class StopwordFeature(Feature):
 
 class PositionFeature(Feature):
     def __init__(self, n_level = 5):
+        super(PositionFeature, self).__init__()
         self.n_level = n_level
 
     def cal_pos(self, phrase, source):
@@ -187,3 +190,119 @@ class PositionFeature(Feature):
         if goldens is not None:
             feature[n_cand:] = np.asarray(map(lambda x:self.cal_pos(x, source), goldens), dtype="float32")
         return feature
+
+
+class PostagSeqFeature(Feature):
+    def __init__(self, idx2word):
+        super(PostagSeqFeature, self).__init__()
+        self.idx2word = idx2word
+        fp = open("/home/yangan/projects/keywords/seq2seq-keyphrase/dataset/keyphrase/punctuation-20000validation-20000testing/postag_seq_dict.pkl", "rb")
+        self.posseqlist = pickle.load(fp)
+
+    def _cal_posseq_feature(self, phrase):
+        phrase_word = [self.idx2word[wordid] for wordid in phrase]
+        pos_tags = pos_tag(phrase_word)
+        pos_tag_str = "_".join([word_tag_tuple[1] for word_tag_tuple in pos_tags])
+        if pos_tag_str in self.posseqlist:
+            return self.posseqlist.index(pos_tag_str)
+        else:
+            return None
+
+    def get_feature(self, source, cands, goldens=None):
+        n_cand = len(cands)
+        n_golden = len(goldens) if goldens is not None else 0
+        feature = np.zeros((n_cand + n_golden, len(self.posseqlist)), dtype="float32")
+        for i in range(n_cand):
+            id = self._cal_posseq_feature(cands[i])
+            if id is not None:
+                feature[i, id] = 1.
+        for i in range(n_golden):
+            id = self._cal_posseq_feature(goldens[i])
+            if id is not None:
+                feature[n_cand + i, id] = 1.
+        return feature
+
+class SuffixSeqFeature(Feature):
+    def __init__(self, idx2word, lemmatize=True):
+        super(SuffixSeqFeature, self).__init__()
+        self.idx2word = idx2word
+        flist = open("/home/yangan/projects/keywords/seq2seq-keyphrase/dataset/suffix/suffix.txt", "r")
+        if lemmatize:
+            fseq = open("/home/yangan/projects/keywords/seq2seq-keyphrase/dataset/keyphrase/punctuation-20000validation-20000testing/suffix_seq_dict_lem10.pkl", "r")
+        else:
+            fseq = open("/home/yangan/projects/keywords/seq2seq-keyphrase/dataset/keyphrase/punctuation-20000validation-20000testing/suffix_seq_dict10.pkl", "r")
+        self.suffix_list = [line.rstrip() for line in flist.readlines()]
+        self.suffix_seqpattern = pickle.load(fseq)
+        fseq.close()
+        flist.close()
+        self.lemmatize = lemmatize
+        if self.lemmatize:
+            self.lemmatizer = WordNetLemmatizer()
+    
+    def _cal_suffixseq_feature(self, phrase):
+        phrase_word = [self.idx2word[wordid] for wordid in phrase]
+        if self.lemmatize:
+            phrase_word = [self.lemmatizer.lemmatize(word) for word in phrase_word]
+        suffix_seq = []
+        for word in phrase:
+            flag = False
+            for s in self.suffix_list:
+                if word.endswith(s):
+                    suffix_seq.append(s)
+                    flag = True
+                    break
+            if not flag:
+                suffix_seq.append('N')
+        suffix_seq_str = "_".join(suffix_seq)
+        if suffix_seq_str in self.suffix_seqpattern:
+            return self.suffix_seqpattern.index(suffix_seq_str)
+        else:
+            return None
+
+    def get_feature(self, source, cands, goldens=None):
+        n_cand = len(cands)
+        n_golden = len(goldens) if goldens is not None else 0
+        feature = np.zeros((n_cand + n_golden, len(self.suffix_seqpattern)), dtype="float32")
+        for i in range(n_cand):
+            id = self._cal_suffixseq_feature(cands[i])
+            if id is not None:
+                feature[i, id] = 1.
+        for i in range(n_golden):
+            id = self._cal_suffixseq_feature(goldens[i])
+            if id is not None:
+                feature[n_cand + i, id] = 1.
+        return feature
+
+
+class TitleFeature(Feature):
+    def __init__(self, idx2word, lemmatize=False):
+        super(TitleFeature, self).__init__()
+        self.idx2word = idx2word
+        self.lemmatize = lemmatize
+        if self.lemmatize:
+            self.lemmatizer = WordNetLemmatizer()
+    
+    def _in_title(self, phrase, title_str):
+        phrase_list = [self.idx2word[wordid] for wordid in phrase]
+        if self.lemmatize:
+            phrase_list = [self.lemmatizer.lemmatize(word) for word in phrase_list]
+        phrase_str = " ".join(phrase_list)
+        return phrase_str in title_str
+
+    def get_feature(self, source, cands, goldens=None):
+        n_cand = len(cands)
+        n_golden = len(goldens) if goldens is not None else 0
+        feature = np.zeros((n_cand + n_golden, 1), dtype="float32")
+        try:
+            title_part = source[:source.index(4)] # 4 is the id of <eos>
+            title_list = [self.idx2word[wordid] for wordid in title_part]
+            if self.lemmatize:
+                title_list = [self.lemmatizer.lemmatize(word) for word in title_list]
+            title_str = " ".join(title_list)
+            feature[:n_cand] = np.asarray(map(lambda x:self._in_title(x, title_str), cands), dtype="float32").reshape((n_cand, 1))
+            if goldens is not None:
+                feature[n_cand:] = np.asarray(map(lambda x:self._in_title(x, title_str), goldens), dtype="float32").reshape((n_golden, 1)) 
+        except:
+            pass
+        finally:
+            return feature     

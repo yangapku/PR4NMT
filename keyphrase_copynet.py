@@ -275,8 +275,14 @@ if __name__ == '__main__':
             feature_extractors.append(StopwordFeature(word2idx))
         if 'PositionFeature' in config['features']:
             feature_extractors.append(PositionFeature(config['n_level']))
+        if 'PostagSeqFeature' in config['features']:
+            feature_extractors.append(PostagSeqFeature(idx2word))
+        if 'SuffixSeqFeature' in config['features']:
+            feature_extractors.append(SuffixSeqFeature(idx2word, lemmatize=True))
+        if 'TitleFeature' in config['features']:
+            feature_extractors.append(TitleFeature(idx2word, lemmatize=False))
 
-    if config['do_train'] or config['do_predict']:
+    if config['do_train'] or config['do_predict'] or config['do_validateforpick']:
         # build the agent
         if config['copynet']:
             agent = NRM(config, n_rng, rng, mode=config['mode'],
@@ -310,6 +316,8 @@ if __name__ == '__main__':
     # do testing?
     do_evaluate     = config['do_evaluate']
     do_validate     = config['do_validate']
+    # do validation after training?
+    do_validateforpick = config['do_validateforpick']
 
     if do_train:
         while epoch < epochs:
@@ -414,6 +422,8 @@ if __name__ == '__main__':
                     mean_ll  = np.average(np.concatenate([l[0] for l in loss_batch]))
                     mean_ppl = np.average(np.concatenate([l[1] for l in loss_batch]))
                     loss.append([mean_ll, mean_ppl])
+                    # modification: not only display accumulated avg loss and ppl, but also show loss and ppl in this iter
+                    logger.info('This iter: %.4f / %.4f' % (mean_ll, mean_ppl))
                     progbar.update(iter_id, [('loss_reg', mean_ll),
                                             ('ppl.', mean_ppl)])                    
 
@@ -485,8 +495,11 @@ if __name__ == '__main__':
                     mean_ll  = np.average(np.concatenate([l[0] for l in loss_batch]))
                     mean_ppl = np.average(np.concatenate([l[1] for l in loss_batch]))
                     loss.append([mean_ll, mean_ppl])
+                    # modification: not only display accumulated avg loss and ppl, but also show loss and ppl in this iter
+                    logger.info('This iter: %.4f / %.4f' % (mean_ll, mean_ppl))
                     progbar.update(iter_id, [('loss_reg', mean_ll),
                                             ('ppl.', mean_ppl)])
+                
 
                     # 5. Quick testing
                     if config['do_quick_testing'] and iter_id % 200 == 0 and iter_id > 1:
@@ -723,6 +736,66 @@ if __name__ == '__main__':
                 progbar_test.update(idx, [])
             # store predictions in file
             serialize_to_file([test_set, test_s_list, test_t_list, test_s_o_list, test_t_o_list, input_encodings, predictions, scores, output_encodings, idx2word], config['predict_path'] + 'predict.{0}.{1}.pkl'.format(config['predict_type'], dataset_name))
+
+    # Test on validation data to pick model
+    if do_validateforpick:
+        # 1. Prepare data
+        data_s = np.array(validation_set['source'])[:config['validation_size']]
+        data_t = np.array(validation_set['target'])[:config['validation_size']]
+
+        # if len(data_s) > 2000:
+        #     data_s = data_s[:2000]
+        #     data_t = data_t[:2000]
+        # if not multi_output, split one data (with multiple targets) into multiple ones
+        if not config['multi_output']:
+            data_s, data_t = split_into_multiple_and_padding(data_s, data_t)
+
+        loss_valid = []
+
+        # for minibatch_id in range(int(math.ceil(len(data_s)/config['mini_batch_size']))):
+        #     mini_data_s = data_s[minibatch_id * config['mini_batch_size']:min((minibatch_id + 1) * config['mini_batch_size'], len(data_s))]
+        #     mini_data_t = data_t[minibatch_id * config['mini_batch_size']:min((minibatch_id + 1) * config['mini_batch_size'], len(data_t))]
+
+        mini_data_idx = 0
+        max_size = config['mini_mini_batch_length']
+        stack_size = 0
+        mini_data_s = []
+        mini_data_t = []
+        mini_batch_cnt = 0
+        while mini_data_idx < len(data_s):
+            mini_batch_cnt += 1
+            if len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) >= max_size:
+                logger.error('mini_mini_batch_length is too small. Enlarge it to 2 times')
+                max_size = len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) * 2
+                config['mini_mini_batch_length'] = max_size
+
+            while mini_data_idx < len(data_s) and stack_size + len(data_s[mini_data_idx]) * len(data_t[mini_data_idx]) < max_size:
+                mini_data_s.append(data_s[mini_data_idx])
+                mini_data_t.append(data_t[mini_data_idx])
+                stack_size += len(data_s[mini_data_idx]) * len(data_t[mini_data_idx])
+                mini_data_idx += 1
+            mini_data_s = np.asarray(mini_data_s)
+            mini_data_t = np.asarray(mini_data_t)
+
+            if config['copynet']:
+                data_c = cc_martix(mini_data_s, mini_data_t)
+                loss_valid += [agent.validate_(unk_filter(mini_data_s), unk_filter(mini_data_t), data_c)]
+            else:
+                loss_valid += [agent.validate_(unk_filter(mini_data_s), unk_filter(mini_data_t))]
+
+            if mini_batch_cnt % 10 == 0:
+                logger.info('Validation progress: %d / %d' % (mini_data_idx, math.ceil(len(data_s))))
+                mean_ll = np.average(np.concatenate([l[0] for l in loss_valid]))
+                mean_ppl = np.average(np.concatenate([l[1] for l in loss_valid]))                
+                logger.info('Current Avg Score: ll=%.4f, ppl=%.4f' % (mean_ll, mean_ppl))
+
+            mini_data_s = []
+            mini_data_t = []
+            stack_size = 0
+
+        mean_ll = np.average(np.concatenate([l[0] for l in loss_valid]))
+        mean_ppl = np.average(np.concatenate([l[1] for l in loss_valid]))
+        logger.info('Final Avg Score: ll=%.4f, ppl=%.4f' % (mean_ll, mean_ppl))
 
     '''
     Evaluate on Testing Data
